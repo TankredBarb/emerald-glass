@@ -1,0 +1,13 @@
+{
+    "KPlugin": {
+        "Name": "Emerald Glass",
+        "Description": "Emerald and ruby glass window decoration with shader bevels and Liquid Glass refraction",
+        "EnabledByDefault": true,
+        "License": "GPL-3.0-or-later"
+    },
+    "X-KDE-ConfigModule": "kcm_emeraldglassdecoration",
+    "org.kde.kdecoration3": {
+        "blur": true,
+        "recommendedBorderSize": "Normal"
+    }
+}

@@ -1,0 +1,21 @@
+# Out-of-source CMake builds and generated shaders
+/build/
+/build-*/
+/cmake-build-*/
+/vendor/kwin-effects-glass/src/generated/
+CMakeUserPresets.json
+
+# Local diagnostics and Python bytecode
+/*.log
+/shader-validation.json
+__pycache__/
+*.py[cod]
+
+# Editor state and local agent/environment metadata
+/.idea/
+/.vscode/
+/.agents/
+/.aws/
+/.codex/
+*~
+*.swp

@@ -1,0 +1,14 @@
+{
+    "KPlugin": {
+        "Name": "Emerald Glass Window Decoration",
+        "Description": "Configure Emerald Glass window decoration and Liquid Glass optics",
+        "Icon": "preferences-system-windows",
+        "ServiceTypes": [
+            "KCModule"
+        ],
+        "License": "GPL-3.0-or-later"
+    },
+    "X-KDE-Keywords": "emerald,glass,liquid,ruby,decoration",
+    "X-KDE-ParentApp": "kcontrol",
+    "X-KDE-Weight": 60
+}

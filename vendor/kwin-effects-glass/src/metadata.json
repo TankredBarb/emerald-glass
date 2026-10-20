@@ -1,0 +1,24 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "KWin development team"
+            },
+            {
+                "Name": "taj_ny"
+            },
+            {
+                "Name": "DaddelZeit"
+            },
+            {
+                "Name": "iGerman00"
+            }
+        ],
+        "Category": "Appearance",
+        "Description": "Emerald & Ruby Liquid Glass shader refraction effect for KWin",
+        "EnabledByDefault": false,
+        "License": "GPL",
+        "Id": "emeraldglass",
+        "Name": "Emerald Glass"
+    }
+}

@@ -1,0 +1,8 @@
+<RCC>
+    <qresource prefix="/emeraldglass/preview">
+        <file alias="fullscreen.vert">../preview/fullscreen.vert</file>
+        <file alias="glass.frag">../preview/glass.frag</file>
+        <file alias="downsample.frag">../vendor/kwin-effects-glass/src/shaders/downsample.glsl</file>
+        <file alias="upsample.frag">../vendor/kwin-effects-glass/src/shaders/upsample.glsl</file>
+    </qresource>
+</RCC>
