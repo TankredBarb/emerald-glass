@@ -215,6 +215,7 @@ BlurEffect::~BlurEffect()
             decoration->removeEventFilter(this);
             disconnect(decoration, nullptr, this, nullptr);
             if (decoration->property("egEnabled").toBool()) {
+                decoration->setProperty("egDesktopSnapshot", QVariant());
                 decoration->setProperty("egShader", false);
                 decoration->update();
             }
@@ -417,6 +418,19 @@ void BlurEffect::updateBlurRegion(EffectWindow *w)
 
 void BlurEffect::slotWindowAdded(EffectWindow *w)
 {
+    if (w->isDesktop()) {
+        connect(w, &EffectWindow::windowDamaged, this, [this, w] {
+            auto *active = effects->activeWindow();
+            if (active && active->decoration() && active->decoration()->property("egDesktopBackdrop").toBool() &&
+                !w->isDeleted() && w->isOnCurrentDesktop() && w->isOnCurrentActivity()) {
+                auto frame = blurRegion(active).translated(active->pos().toPoint());
+                frame &= w->frameGeometry().toAlignedRect();
+                if (!frame.isEmpty()) {
+                    effects->addRepaint(frame);
+                }
+            }
+        });
+    }
     SurfaceInterface *surf = w->surface();
 
     if (surf) {
@@ -530,6 +544,13 @@ bool BlurEffect::eventFilter(QObject *watched, QEvent *event)
 {
     if (qobject_cast<KDecoration3::Decoration *>(watched) && event->type() == QEvent::DynamicPropertyChange) {
         const auto name = static_cast<QDynamicPropertyChangeEvent *>(event)->propertyName();
+        if (name == "egDesktopBackdrop") {
+            if (!watched->property("egDesktopBackdrop").toBool()) {
+                watched->setProperty("egDesktopSnapshot", QVariant());
+            }
+            // Source changes invalidate even areas without client damage.
+            effects->addRepaintFull();
+        }
         if (name == "egEnabled" || name == "egFrameRegion") {
             for (auto *w : effects->stackingOrder()) {
                 if (w->decoration() == watched) {
@@ -829,6 +850,16 @@ void BlurEffect::updateDecorationMode(EffectWindow *w, int mask)
         // Deformation effects snapshot the native decoration. Keep its full
         // material in that snapshot rather than painting an undeformed screen rectangle.
         const bool transformed = (mask & PAINT_WINDOW_TRANSFORMED) || effects->activeFullScreenEffect();
+#ifndef GLASS_X11
+        if (transformed && decoration->property("egDesktopBackdrop").toBool() &&
+            decoration->property("egShader").toBool()) {
+            if (decoration->property("egDesktopSnapshot").value<QImage>().isNull()) {
+                captureDesktopSnapshot(w);
+            }
+        } else {
+            decoration->setProperty("egDesktopSnapshot", QVariant());
+        }
+#endif
         decoration->setProperty("egTransformed", transformed);
     }
 }
@@ -1019,17 +1050,90 @@ GLTexture *BlurEffect::ensureNoiseTexture(int noiseStrength)
     return m_noisePass.noiseTexture.get();
 }
 
-void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &viewport, EffectWindow *w, int mask, const BlurRegion &deviceRegion, WindowPaintData &data)
+#ifndef GLASS_X11
+bool BlurEffect::renderDesktopBackdrop(GLFramebuffer *framebuffer, const QRect &rect, const RenderTarget &sceneTarget)
+{
+    QList<EffectWindow *> desktops;
+    for (auto *window : effects->stackingOrder()) {
+        if (window->isDesktop() && !window->isDeleted() && window->isOnCurrentDesktop() &&
+            window->isOnCurrentActivity() && window->frameGeometry().intersects(rect)) {
+            desktops.append(window);
+        }
+    }
+    if (desktops.isEmpty()) {
+        return false;
+    }
+
+    // Render the desktop surface directly, even when occluded by other windows.
+    // Match the existing logical-pixel blur cache and the output's color space.
+    const RenderTarget target(framebuffer, sceneTarget.colorDescription());
+    const RenderViewport viewport(RectF(rect), 1.0, target, QPoint());
+    EglContext::currentContext()->pushFramebuffer(framebuffer);
+    const bool scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glClearColor(0, 0, 0, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    if (scissorEnabled) {
+        glEnable(GL_SCISSOR_TEST);
+    }
+    for (auto *desktop : desktops) {
+        WindowPaintData data;
+        effects->renderWindow(target, viewport, desktop, 0, Region(viewport.deviceRect()), data);
+    }
+    EglContext::currentContext()->popFramebuffer();
+    return true;
+}
+
+void BlurEffect::captureDesktopSnapshot(EffectWindow *w)
+{
+    auto *decoration = w->decoration();
+    const QRect localRect = decoration->property("egFrameRegion").value<QRegion>().boundingRect();
+    if (localRect.isEmpty() || !m_valid) {
+        return;
+    }
+    effects->makeOpenGLContextCurrent();
+    const QRect rect = localRect.translated(w->pos().toPoint());
+    const qreal scale = w->window()->targetScale();
+    auto texture = GLTexture::allocate(GL_RGBA8, RectF(rect).scaled(scale).rounded().size());
+    if (!texture) {
+        return;
+    }
+    GLFramebuffer framebuffer(texture.get());
+    if (!framebuffer.valid()) {
+        return;
+    }
+    // QPainter expects sRGB pixels. Reuse the production material/blur path,
+    // but bypass scene fallback and animation transforms for this local snapshot.
+    const RenderTarget target(&framebuffer);
+    const RenderViewport viewport(RectF(rect), scale, target, QPoint());
+    EglContext::currentContext()->pushFramebuffer(&framebuffer);
+    const bool scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glClearColor(0, 0, 0, 0);
+    glClear(GL_COLOR_BUFFER_BIT);
+    if (scissorEnabled) {
+        glEnable(GL_SCISSOR_TEST);
+    }
+    WindowPaintData data;
+    const bool rendered = blur(target, viewport, w, 0, BlurRegion(viewport.deviceRect()), data, true);
+    EglContext::currentContext()->popFramebuffer();
+    if (rendered) {
+        decoration->setProperty("egDesktopSnapshot", texture->toImage());
+    }
+}
+#endif
+
+bool BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &viewport, EffectWindow *w, int mask, const BlurRegion &deviceRegion, WindowPaintData &data, bool desktopSnapshot)
 {
     auto it = m_windows.find(w);
     if (it == m_windows.end()) {
-        return;
+        return false;
     }
 
     BlurEffectData &blurInfo = it->second;
     BlurRenderData &renderInfo = blurInfo.render[m_currentOutput];
-    if (!shouldBlur(w, mask, data)) {
-        return;
+    if (!desktopSnapshot && !shouldBlur(w, mask, data)) {
+        return false;
     }
 
     auto transformShape = [&](BlurRegion shape) {
@@ -1086,7 +1190,7 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
     const QRect scaledBackgroundRect = RectF(backgroundRect).scaled(viewport.scale()).rounded();
     const QRect deviceBackgroundRect = viewport.mapToDeviceCoordinates(Rect(backgroundRect)).rounded();
 #endif
-    const auto opacity = w->opacity() * data.opacity();
+    const auto opacity = desktopSnapshot ? 1.0 : w->opacity() * data.opacity();
 
     // Get the effective shape that will be painted on screen. It's possible that all of it will be clipped.
     auto buildEffectiveShape = [&](const BlurRegion &shape) {
@@ -1137,7 +1241,7 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
     const auto effectiveFrameShape = splitRenderRegions ? buildEffectiveShape(frameShape) : decltype(effectiveEffectShape){};
 
     if (effectiveEffectShape.isEmpty()) {
-        return;
+        return false;
     }
 
     // Maybe reallocate offscreen render targets. Keep in mind that the first one contains
@@ -1156,7 +1260,7 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
             auto texture = GLTexture::allocate(textureFormat, (backgroundRect.size() / (1 << i)).expandedTo(QSize(1, 1)));
             if (!texture) {
                 qCWarning(KWIN_BLUR) << "Failed to allocate an offscreen texture";
-                return;
+                return false;
             }
             texture->setFilter(GL_LINEAR);
             texture->setWrapMode(GL_CLAMP_TO_EDGE);
@@ -1164,7 +1268,7 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
             auto framebuffer = std::make_unique<GLFramebuffer>(texture.get());
             if (!framebuffer->valid()) {
                 qCWarning(KWIN_BLUR) << "Failed to create an offscreen framebuffer";
-                return;
+                return false;
             }
 #ifdef GLASS_X11
             GLFramebuffer::pushFramebuffer(framebuffer.get());
@@ -1194,11 +1298,18 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
         renderInfo.framebuffers[0]->blitFromRenderTarget(renderTarget, viewport, dirtyRect, dirtyRect.translated(-backgroundRect.topLeft()));
     }
 #else
-    const Region dirtyRegion = viewport.mapFromDeviceCoordinatesContained(deviceRegion) & backgroundRect;
-    for (const Rect &dirtyRect : dirtyRegion.rects()) {
-        // Outside dirtyRegion the target may still contain our previous frame.
-        // Keep the cached backdrop there instead of feeding our own glass/text back in.
-        renderInfo.framebuffers[0]->blitFromRenderTarget(renderTarget, viewport, dirtyRect, dirtyRect.translated(-backgroundRect.topLeft()));
+    const bool desktopBackdrop = w->decoration()->property("egDesktopBackdrop").toBool() &&
+        renderDesktopBackdrop(renderInfo.framebuffers[0].get(), backgroundRect, renderTarget);
+    if (desktopSnapshot && !desktopBackdrop) {
+        return false;
+    }
+    if (!desktopBackdrop) {
+        const Region dirtyRegion = viewport.mapFromDeviceCoordinatesContained(deviceRegion) & backgroundRect;
+        for (const Rect &dirtyRect : dirtyRegion.rects()) {
+            // Outside dirtyRegion the target may still contain our previous frame.
+            // Keep the cached backdrop there instead of feeding our own glass/text back in.
+            renderInfo.framebuffers[0]->blitFromRenderTarget(renderTarget, viewport, dirtyRect, dirtyRect.translated(-backgroundRect.topLeft()));
+        }
     }
 #endif
 
@@ -1307,7 +1418,7 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
         vbo->unmap();
     } else {
         qCWarning(KWIN_BLUR) << "Failed to map vertex buffer";
-        return;
+        return false;
     }
 
     vbo->bindArrays();
@@ -1625,6 +1736,7 @@ void BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
     }
 
     vbo->unbindArrays();
+    return true;
 }
 
 bool BlurEffect::isActive() const

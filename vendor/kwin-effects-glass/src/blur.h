@@ -155,7 +155,11 @@ private:
     void updateBlurRegion(EffectWindow *w);
     void updateDecorationMode(EffectWindow *w, int mask);
     void repaintDynamicCorners();
-    void blur(const RenderTarget &renderTarget, const RenderViewport &viewport, EffectWindow *w, int mask, const BlurRegion &deviceRegion, WindowPaintData &data);
+    bool blur(const RenderTarget &renderTarget, const RenderViewport &viewport, EffectWindow *w, int mask, const BlurRegion &deviceRegion, WindowPaintData &data, bool desktopSnapshot = false);
+#ifndef GLASS_X11
+    bool renderDesktopBackdrop(GLFramebuffer *framebuffer, const QRect &rect, const RenderTarget &sceneTarget);
+    void captureDesktopSnapshot(EffectWindow *w);
+#endif
     GLTexture *ensureNoiseTexture(int noiseStrength);
     QMatrix4x4 colorMatrix(const float &brightness, const float &saturation, const float &contrast) const;
     BlurPipelineSettings pipelineSettingsForStrength(int blurStrength, int noiseStrength) const;

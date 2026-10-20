@@ -88,6 +88,25 @@ The GL failure regression exercises headless/context failure and repeated
 fallback calls; it is not a hardware-driver shader failure test. CPU resize
 probe timings exclude GPU blur, compositor presentation and client frame pacing.
 
+The desktop-backdrop option has automated coverage for configuration, its KCM
+checkbox, defaults, activation and full/partial maximization. The Wayland effect
+renders current desktop surfaces directly into the existing per-window/per-view
+blur cache, using its logical coordinates and the output color description.
+Desktop damage repaints only the active maximized frame intersecting that desktop
+surface, excluding other desktops/activities; source changes schedule a full
+repaint. Without a desktop surface, normal scene capture is used. During a
+transformation the production shader renders an sRGB material snapshot once,
+which the native decoration carries through the animation without standard Blur.
+The snapshot excludes caption and native cursor halo, which remain native.
+
+The user confirmed the ordinary desktop-backdrop behavior in a live session.
+Follow-up tests independently exercise activation and maximization, optical and
+non-optical snapshot painting, client exclusion and fallback/unload. Deliberately
+disconnecting either state handler makes the regression fail; the previous
+plugin fails the snapshot regression. GPU snapshot capture and animation still
+need live verification after installing these fixes, including mixed output
+scales, wallpaper changes and desktop/activity switches.
+
 Historical design investigations are kept in [RESEARCH.md](../RESEARCH.md) and
 [LIQUID_GLASS_REDESIGN.md](LIQUID_GLASS_REDESIGN.md). Local temporary paths and
 older build commands in these records describe the original experiments.

@@ -69,6 +69,7 @@ struct MaterialConfig {
     float adaptiveContrast = 0.35f;
     float frameOpacity = 0.84f;
     int blurStrength = 6;
+    bool desktopBackdropForMaximized = false;
 
     int cornerRadius = 5;
     int titleHeight = 39;
@@ -119,6 +120,7 @@ inline MaterialConfig loadMaterialConfig()
     cfg.adaptiveContrast = std::clamp(float(mat.readEntry("AdaptiveContrast", 35)) / 100.0f, 0.0f, 1.0f);
     cfg.frameOpacity = std::clamp(float(mat.readEntry("FrameOpacity", 84)) / 100.0f, 0.20f, 1.0f);
     cfg.blurStrength = std::clamp(mat.readEntry("BlurStrength", 6), 0, 15);
+    cfg.desktopBackdropForMaximized = mat.readEntry("DesktopBackdropForMaximized", false);
     cfg.shaderEffectEnabled = mat.readEntry("ShaderEffectEnabled", true);
 
     KConfigGroup geom(config, QStringLiteral("Geometry"));
@@ -151,6 +153,7 @@ inline void saveMaterialConfig(const MaterialConfig &cfg)
     mat.writeEntry("AdaptiveContrast", qRound(cfg.adaptiveContrast * 100.0f));
     mat.writeEntry("FrameOpacity", qRound(cfg.frameOpacity * 100.0f));
     mat.writeEntry("BlurStrength", cfg.blurStrength);
+    mat.writeEntry("DesktopBackdropForMaximized", cfg.desktopBackdropForMaximized);
     mat.writeEntry("ShaderEffectEnabled", cfg.shaderEffectEnabled);
 
     KConfigGroup geom(config, QStringLiteral("Geometry"));

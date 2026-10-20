@@ -20,6 +20,8 @@ port of Apple's implementation.
   highlights and adaptive backdrop contrast, with a live settings preview.
 - **Independent border blur:** adjustable blurriness even with optics disabled.
   At 100% base opacity, the material excludes the backdrop, including with LG on.
+- **Desktop backdrop for maximized windows:** optionally sample the desktop
+  behind the active, fully maximized window's glass borders, ignoring other windows.
 - **Readable titles:** automatic light/dark text selection or manual overrides
   for active and inactive windows, plus title alignment controls.
 - **Glass window buttons:** KWin system layouts, visible application icons and
@@ -93,6 +95,13 @@ page controls the optional Liquid Glass material. Border blur requires the
 companion effect; optics controls additionally require **Use Liquid Glass
 optics**. Changes appear immediately in the dialog preview; **Apply** saves
 and updates desktop windows.
+
+Under **Border Blur**, **Use desktop background for the active maximized window**
+is off by default. When enabled, only the active window maximized in both
+directions uses the desktop surface as its border backdrop. Restored, partially
+maximized and inactive windows keep normal stacking. This requires the companion
+effect and works with Liquid Glass optics either enabled or disabled. If no
+desktop surface is available, the effect uses the normal scene backdrop.
 
 For a first setup, choose a color preset close to your wallpaper's dominant
 color, then adjust tint and opacity independently for active and inactive

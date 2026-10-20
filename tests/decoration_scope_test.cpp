@@ -14,6 +14,7 @@
 #include <QLabel>
 #include <QGroupBox>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QSlider>
 #include <QTabWidget>
 #include <QTemporaryDir>
@@ -25,8 +26,12 @@ public:
 #define BOOL(name,value) bool name() const override { return value; }
  bool active=true;
  bool isActive() const override { return active; }
- BOOL(isOnAllDesktops,false) BOOL(isShaded,false) BOOL(isMaximized,false)
- BOOL(isMaximizedHorizontally,false) BOOL(isMaximizedVertically,false) BOOL(isKeepAbove,false) BOOL(isKeepBelow,false)
+ bool maximizedHorizontally=false, maximizedVertically=false;
+ bool isMaximized() const override { return maximizedHorizontally && maximizedVertically; }
+ bool isMaximizedHorizontally() const override { return maximizedHorizontally; }
+ bool isMaximizedVertically() const override { return maximizedVertically; }
+ BOOL(isOnAllDesktops,false) BOOL(isShaded,false)
+ BOOL(isKeepAbove,false) BOOL(isKeepBelow,false)
  BOOL(isCloseable,true) BOOL(isMaximizeable,true) BOOL(isMinimizeable,true) BOOL(providesContextHelp,false)
  BOOL(isModal,false) BOOL(isShadeable,true) BOOL(isMoveable,true) BOOL(isResizeable,true)
  BOOL(hasApplicationMenu,false) BOOL(isApplicationMenuActive,false) BOOL(isExcludedFromCapture,false)
@@ -82,6 +87,23 @@ int main(int argc,char **argv) {
  QObject::connect(d.get(),&Decoration::nextStateChanged,d.get(),[&](const auto &state){d->apply(state);});
  check(d->init(),"decoration initializes");
  check(!d->property("egPreview").toBool(),"live bridge does not enable local preview rendering");
+ check(!EmeraldGlass::loadMaterialConfig().desktopBackdropForMaximized,"desktop backdrop defaults off");
+ for(bool enabled : {true,false}) {
+  cfg.desktopBackdropForMaximized=enabled; EmeraldGlass::saveMaterialConfig(cfg); settings->reconfigured();
+  check(EmeraldGlass::loadMaterialConfig().desktopBackdropForMaximized==enabled,"desktop backdrop config round trip");
+  for(bool active : {true,false}) for(bool horizontal : {true,false}) for(bool vertical : {true,false}) {
+   // Establish activation independently, then change only maximization.
+   bridge.client->active=active; d->window()->activeChanged(active);
+   bridge.client->maximizedHorizontally=horizontal; bridge.client->maximizedVertically=vertical;
+   d->window()->maximizedChanged(horizontal && vertical);
+   check(d->property("egDesktopBackdrop").toBool()==(enabled && active && horizontal && vertical),
+         "maximization alone updates desktop source, including partial maximization");
+   bridge.client->active=!active; d->window()->activeChanged(!active);
+   check(d->property("egDesktopBackdrop").toBool()==(enabled && !active && horizontal && vertical),
+         "activation alone updates desktop source without a geometry change");
+  }
+ }
+ bridge.client->active=true; d->window()->activeChanged(true);
  const QRegion frame=d->property("egFrameRegion").value<QRegion>();
  check(!frame.isEmpty(),"material frame is published");
  const QRegion client(d->rect().adjusted(d->borderLeft(),d->borderTop(),-d->borderRight(),-d->borderBottom()).toAlignedRect());
@@ -94,6 +116,42 @@ int main(int argc,char **argv) {
   QImage image(d->size().toSize(),QImage::Format_ARGB32_Premultiplied); image.fill(Qt::transparent);
   QPainter painter(&image); d->paint(&painter,d->rect()); painter.end(); return image;
  };
+ // A transformation snapshot contains only the material. Native caption/halo
+ // remain live, while standard Blur must not bring back the lower windows.
+ const auto beforeSnapshot=cfg;
+ cfg.desktopBackdropForMaximized=true;
+ EmeraldGlass::saveMaterialConfig(cfg); settings->reconfigured();
+ bridge.client->maximizedHorizontally=bridge.client->maximizedVertically=true;
+ d->window()->maximizedChanged(true);
+ QImage snapshot(500,cfg.titleHeight,QImage::Format_ARGB32_Premultiplied);
+ snapshot.fill(QColor("#2475df"));
+ d->setProperty("egDesktopSnapshot",snapshot); d->setProperty("egTransformed",true);
+ check(d->property("egDesktopBackdrop").toBool() && d->blurRegion().isEmpty(),
+       "desktop snapshot suppresses standard blur during transformation");
+ check(nativeImage().pixelColor(250,20)==QColor("#2475df"),
+       "optical snapshot is painted without a second native material coat");
+ check(nativeImage().pixelColor(250,100).alpha()==0,"desktop snapshot excludes client content");
+ cfg.shaderEffectEnabled=false; cfg.frameOpacity=.2f;
+ EmeraldGlass::saveMaterialConfig(cfg); settings->reconfigured();
+ const auto basicSnapshot=nativeImage();
+ check(d->blurRegion().isEmpty() && basicSnapshot.pixelColor(250,20).alpha()==255,
+       "non-optical snapshot supplies an opaque desktop beneath native material");
+ snapshot.fill(QColor("#df7524")); d->setProperty("egDesktopSnapshot",snapshot);
+ check(nativeImage().pixelColor(250,20)!=basicSnapshot.pixelColor(250,20),
+       "non-optical native material transmits its desktop snapshot");
+ bridge.client->active=false; d->window()->activeChanged(false);
+ check(!d->blurRegion().isEmpty(),"inactive transformed window resumes normal blur despite an old snapshot");
+ bridge.client->active=true; d->window()->activeChanged(true);
+ check(d->blurRegion().isEmpty(),"active maximized snapshot resumes without standard blur");
+ d->setProperty("egDesktopSnapshot",QVariant());
+ check(!d->blurRegion().isEmpty(),"missing snapshot retains native fallback");
+ d->setProperty("egDesktopSnapshot",snapshot); d->setProperty("egShader",false);
+ check(!d->blurRegion().isEmpty(),"effect unload ignores retained snapshot");
+ d->setProperty("egDesktopSnapshot",QVariant()); d->setProperty("egTransformed",false);
+ bridge.client->maximizedHorizontally=bridge.client->maximizedVertically=false;
+ d->window()->maximizedChanged(false);
+ cfg=beforeSnapshot; EmeraldGlass::saveMaterialConfig(cfg); settings->reconfigured();
+ d->setProperty("egShader",true);
  auto hover=[&](QEvent::Type type,QPointF point,QPointF previous) {
   QHoverEvent event(type,point,point,previous); QCoreApplication::sendEvent(d.get(),&event);
  };
@@ -187,6 +245,17 @@ int main(int argc,char **argv) {
  auto *blur=tabs->widget(0)->findChild<QSlider *>(QStringLiteral("frameBlurStrength"));
  check(blur && blur->minimum()==0 && blur->maximum()==15,"explicit blur control is on first page");
  check(blur->value()==15,"blur slider loads saved value");
+ auto *desktopBackdrop=tabs->widget(0)->findChild<QCheckBox *>(QStringLiteral("desktopBackdropForMaximized"));
+ check(desktopBackdrop && !desktopBackdrop->isChecked(),"desktop backdrop checkbox is on first page and defaults off");
+ check(!desktopBackdrop->isEnabled(),"desktop backdrop requires the companion effect");
+ for(bool enabled : {true,false}) {
+  desktopBackdrop->setChecked(enabled); module->save(); module->load();
+  check(EmeraldGlass::loadMaterialConfig().desktopBackdropForMaximized==enabled && desktopBackdrop->isChecked()==enabled,
+        "desktop backdrop checkbox saves and reloads");
+ }
+ desktopBackdrop->setChecked(true); module->defaults();
+ check(!desktopBackdrop->isChecked(),"Restore Defaults disables desktop backdrop");
+ module->load();
  auto *optics=module->widget()->findChild<QGroupBox *>(QStringLiteral("liquidGlassControls"));
  check(optics && !optics->isEnabled(),"Liquid Glass controls stay disabled without a running effect");
  check(!blur->isEnabled(),"shader blur control is disabled without a running effect");

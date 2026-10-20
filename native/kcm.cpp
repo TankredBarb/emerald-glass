@@ -52,6 +52,10 @@ public:
         m_blurSlider = makeSliderRow(blurForm, blurGroup, QStringLiteral("Blurriness:"), 0, 15, QStringLiteral(" / 15"));
         m_blurSlider->setObjectName(QStringLiteral("frameBlurStrength"));
         m_blurSlider->setToolTip(QStringLiteral("0 keeps the background sharp; 15 gives maximum blur. Applies only to Emerald Glass borders. The CPU fallback uses standard KWin Blur settings."));
+        m_desktopBackdropCheck = new QCheckBox(QStringLiteral("Use desktop background for the active maximized window"), blurGroup);
+        m_desktopBackdropCheck->setObjectName(QStringLiteral("desktopBackdropForMaximized"));
+        m_desktopBackdropCheck->setToolTip(QStringLiteral("Glass borders sample the desktop instead of windows underneath, only while the window is active and fully maximized. Requires the Emerald Glass effect; also works with Liquid Glass optics disabled."));
+        blurForm->addRow(m_desktopBackdropCheck);
         colorLayout->addWidget(blurGroup);
 
         auto *colorGroup = new QGroupBox(QStringLiteral("Glass Color Palette"), colorPage);
@@ -195,6 +199,7 @@ public:
         connect(m_titleAlignCombo, &QComboBox::currentIndexChanged, this, &EmeraldGlassConfigModule::onUiEdited);
         connect(m_useSystemButtonsCheck, &QCheckBox::toggled, this, &EmeraldGlassConfigModule::onUiEdited);
         connect(m_shaderCheck, &QCheckBox::toggled, this, &EmeraldGlassConfigModule::onUiEdited);
+        connect(m_desktopBackdropCheck, &QCheckBox::toggled, this, &EmeraldGlassConfigModule::onUiEdited);
         updateOpticsAvailability();
         refreshEffectState();
         auto *effectPoll = new QTimer(this);
@@ -316,6 +321,7 @@ private:
         m_adaptiveSlider->setValue(qRound(cfg.adaptiveContrast * 100.0f));
         m_hoverGlowSlider->setValue(qRound(cfg.hoverGlow * 100.0f));
         m_shaderCheck->setChecked(cfg.shaderEffectEnabled);
+        m_desktopBackdropCheck->setChecked(cfg.desktopBackdropForMaximized);
 
         m_titleHeightSpin->setValue(cfg.titleHeight);
         m_borderWidthSpin->setValue(cfg.borderWidth);
@@ -345,6 +351,7 @@ private:
         m_working.adaptiveContrast = m_adaptiveSlider->value() / 100.0f;
         m_working.hoverGlow = m_hoverGlowSlider->value() / 100.0f;
         m_working.shaderEffectEnabled = m_shaderCheck->isChecked();
+        m_working.desktopBackdropForMaximized = m_desktopBackdropCheck->isChecked();
         m_working.titleHeight = m_titleHeightSpin->value();
         m_working.borderWidth = m_borderWidthSpin->value();
         m_working.cornerRadius = m_cornerRadiusSpin->value();
@@ -384,6 +391,7 @@ private:
     QSlider *m_opacitySlider = nullptr;
     QSlider *m_refractionSlider = nullptr;
     QSlider *m_blurSlider = nullptr;
+    QCheckBox *m_desktopBackdropCheck = nullptr;
     QSlider *m_dispersionSlider = nullptr;
     QSlider *m_specularSlider = nullptr;
     QSlider *m_adaptiveSlider = nullptr;

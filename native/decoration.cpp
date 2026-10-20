@@ -61,11 +61,16 @@ public:
     QColor currentAccentColor() const { return m_cfg.colorForWindow(window() && window()->isActive()); }
     float currentTintStrength() const { return m_cfg.tintForWindow(window() && window()->isActive()); }
     QPointF pointerPos() const { return m_pointer; }
+    bool hasDesktopSnapshot() const
+    {
+        return property("egShader").toBool() && property("egTransformed").toBool() &&
+            property("egDesktopBackdrop").toBool() && !property("egDesktopSnapshot").value<QImage>().isNull();
+    }
     bool isUsingShaderMaterial() const
     {
         return m_cfg.shaderEffectEnabled &&
             ((m_isPreview && m_previewEffectEnabled && !m_previewImage.isNull()) ||
-             (property("egShader").toBool() && !property("egTransformed").toBool()));
+             (property("egShader").toBool() && (!property("egTransformed").toBool() || hasDesktopSnapshot())));
     }
 
     bool init() override
@@ -132,6 +137,13 @@ public:
                 p->drawImage(QPointF(), m_previewImage);
                 p->restore();
             }
+        }
+        if (hasDesktopSnapshot()) {
+            const QRegion frame = property("egFrameRegion").value<QRegion>();
+            p->save();
+            p->setClipRegion(frame, Qt::IntersectClip);
+            p->drawImage(QRectF(frame.boundingRect()), property("egDesktopSnapshot").value<QImage>());
+            p->restore();
         }
         if (!isUsingShaderMaterial()) {
             ensureFrameCache(bounds.size(), dpr);
@@ -266,6 +278,8 @@ public:
 
         setProperty("egEnabled", true);
         setProperty("egOptics", m_cfg.shaderEffectEnabled);
+        setProperty("egDesktopBackdrop", m_cfg.desktopBackdropForMaximized &&
+                    window() && window()->isActive() && window()->isMaximized());
         setProperty("egButtons", geometry);
         setProperty("egCloseButton", closeIdx);
         setProperty("egHover", hover);
@@ -282,6 +296,11 @@ public:
         setProperty("egAdaptiveContrast", m_cfg.adaptiveContrast);
         setProperty("egCornerRadius", radius());
         setProperty("egTitleHeight", qreal(m_cfg.titleHeight));
+        // A desktop snapshot already includes the backdrop; standard Blur
+        // would otherwise add the lower windows again during deformation.
+        setBlurRegion(property("egShader").toBool() &&
+                      (!property("egTransformed").toBool() || hasDesktopSnapshot())
+                      ? QRegion() : property("egFrameRegion").value<QRegion>());
         update();
     }
 
@@ -290,7 +309,7 @@ protected:
     {
         if (event->type() == QEvent::DynamicPropertyChange) {
             const auto name = static_cast<QDynamicPropertyChangeEvent *>(event)->propertyName();
-            if (name == "egShader" || name == "egTransformed") {
+            if (name == "egShader" || name == "egTransformed" || name == "egDesktopSnapshot") {
                 layoutButtons();
             }
         }
@@ -520,9 +539,6 @@ private:
         }
         const QRegion frameRegion(outer.toFillPolygon().toPolygon());
         setProperty("egFrameRegion", frameRegion);
-        // Standard Blur handles the CPU fallback only. The shader effect
-        // consumes egFrameRegion directly, without blurring the frame twice.
-        setBlurRegion(property("egShader").toBool() && !property("egTransformed").toBool() ? QRegion() : frameRegion);
         publish();
     }
 
