@@ -29,6 +29,11 @@ uniform int opticsDisabled;
 // Standard Blur saturation minus one; zero preserves the sampled colors.
 uniform float backdropSaturationOffset;
 
+// The standalone comparison can override the selected production style.
+#ifndef CLOSE_PREVIEW_STYLE
+#define CLOSE_PREVIEW_STYLE 3
+#endif
+
 float boxDistance(vec2 p, vec4 box, float radius)
 {
     vec2 q = abs(p - box.xy - box.zw * 0.5) - box.zw * 0.5 + radius;
@@ -95,6 +100,9 @@ vec3 closeButtonAccent(vec3 base)
     float chroma = peak - min(min(base.r, base.g), base.b);
     bool redFamily = base.r == peak && chroma > peak * 0.1
         && abs(base.g - base.b) <= chroma * 0.5;
+    bool goldFamily = base.r == peak && base.g > peak * 0.45
+        && base.g < peak * 0.85 && base.b < peak * 0.25;
+    if (goldFamily) return vec3(0.06, 0.36, 1.0);
     return redFamily ? vec3(1.0, 0.70, 0.12) : vec3(0.92, 0.08, 0.04);
 }
 
@@ -103,6 +111,16 @@ vec4 buttonMaterial(vec2 p, float distance, int button)
     bool closeFeedback = button >= 0 && button == buttonCloseIndex
         && (button == hoverButton || button == pressedButton);
     vec3 materialAccent = closeFeedback ? closeButtonAccent(accent) : accent;
+    // Pale glass and semantic Close feedback need headroom for the lens body.
+    // Stacking white rim, top reflection and hover light used to clip them flat.
+    float restrainedLight = closeFeedback ? 1.0 : smoothstep(0.40, 0.70, min(min(accent.r, accent.g), accent.b));
+#if CLOSE_PREVIEW_STYLE > 0
+    if (closeFeedback) restrainedLight = 0.35;
+#endif
+    vec3 lightingAccent = materialAccent;
+#if CLOSE_PREVIEW_STYLE == 3
+    if (closeFeedback) lightingAccent = mix(accent, materialAccent, 0.20);
+#endif
     float epsilon = 0.45;
     vec2 gradient = vec2(
         materialDistance(p + vec2(epsilon, 0.0), button) - materialDistance(p - vec2(epsilon, 0.0), button),
@@ -171,7 +189,18 @@ vec4 buttonMaterial(vec2 p, float distance, int button)
     tintTarget = mix(vec3(tintLuma), tintTarget, tintGamut);
     color = mix(color, tintTarget, tintBoost);
 
-    if (closeFeedback) color = mix(color, materialAccent * 0.65, 0.75);
+    if (closeFeedback) {
+#if CLOSE_PREVIEW_STYLE == 1
+        color = mix(color, materialAccent * 0.65, 0.25);
+#elif CLOSE_PREVIEW_STYLE == 2
+        color = mix(color, materialAccent * 0.65, 0.45);
+#elif CLOSE_PREVIEW_STYLE == 3
+        float depth = smoothstep(0.0, 4.0, max(-distance, 0.0));
+        color = mix(color, materialAccent * 0.65, 0.35 * depth);
+#else
+        color = mix(color, materialAccent * 0.65, 0.75);
+#endif
+    }
 
     // Polished highlights stay at the rim instead of washing out caption glyphs.
     float specScale = specularStrength * (1.0 - 0.8 * captionBody);
@@ -182,10 +211,12 @@ vec4 buttonMaterial(vec2 p, float distance, int button)
     float fresnel = pow(1.0 - normal.z, 3.0) * specScale;
     float directionalEdge = dot(direction, normalize(vec2(-0.55, -1.0)));
     color *= 1.0 + directionalEdge * bevel * 0.28 * specScale;
-    color += mix(vec3(1.0), materialAccent, 0.18) * (specular * 0.65 + fresnel * 0.25);
+    color += mix(vec3(1.0), lightingAccent, mix(0.18, 0.65, restrainedLight))
+        * (specular * mix(0.65, 0.30, restrainedLight) + fresnel * mix(0.25, 0.12, restrainedLight));
 
     float contour = exp(-pow((distance + 0.65 / scale) * scale / 0.48, 2.0));
-    color = mix(color, mix(materialAccent, vec3(1.0), max(directionalEdge, 0.0) * 0.7), contour * 0.82);
+    color = mix(color, mix(lightingAccent, vec3(1.0), max(directionalEdge, 0.0) * mix(0.7, 0.25, restrainedLight)),
+                contour * mix(0.82, 0.60, restrainedLight));
     float darkLip = exp(-pow((distance + 1.65 / scale) * scale / 0.65, 2.0));
     color *= 1.0 - darkLip * 0.24;
 
@@ -212,14 +243,17 @@ vec4 buttonMaterial(vec2 p, float distance, int button)
     if (button >= 0) {
         float y = (p.y - buttonRect[button].y) / max(buttonRect[button].w, 1.0);
         color *= pressed ? 0.55 : 0.68;
-        color += mix(materialAccent, vec3(1.0), 0.75) * (1.0 - smoothstep(0.05, 0.5, y)) * (pressed ? 0.13 : 0.34);
+        color += mix(lightingAccent, vec3(1.0), mix(0.75, 0.25, restrainedLight))
+            * (1.0 - smoothstep(0.05, 0.5, y)) * (pressed ? 0.13 : mix(0.34, 0.20, restrainedLight));
         color += materialAccent * 0.11;
         if (button == hoverButton) {
             float glow = exp(-length(p - pointer) / 24.0);
-            color += materialAccent * glow * 0.55 * glowScale;
+            color += materialAccent * glow * mix(0.55, 0.22, restrainedLight) * glowScale;
         }
     }
-    return vec4(color, alpha);
+    // Clamp straight color before coverage premultiplication so bright feedback
+    // cannot overwhelm the antialiased rounded edge.
+    return vec4(clamp(color, 0.0, 1.0), alpha);
 }
 
 // The window is one glass sheet. The client hole only clips output;

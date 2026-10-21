@@ -314,15 +314,16 @@ int main(int argc,char **argv) {
  }
  for (const QColor baseColor : {QColor("#f7140e"),QColor("#ff8c9d"),QColor("#78222d"),QColor("#ff9e14"),QColor("#17f559")}) {
   const bool warmClose=baseColor!=QColor("#ff9e14") && baseColor!=QColor("#17f559");
+  const bool blueClose=baseColor==QColor("#ff9e14");
   for(bool pressed : {false,true}) for(float glow : {0.f,1.f}) {
    buttonConfig.hoverGlow=glow;
    QImage image(40,36,QImage::Format_ARGB32_Premultiplied); image.fill(Qt::transparent);
    QPainter painter(&image);
    EmeraldGlass::paintButtonGlass(&painter,QRectF(5,5,27,23),1,baseColor,buttonConfig.tint,true,!pressed,pressed,QPointF(18,17),buttonConfig);
    painter.end(); const auto pixel=image.pixelColor(18,18);
-   check(pixel.red()>pixel.blue()*2,"native close warning keeps a warm visible color");
-   check(warmClose ? pixel.green()>pixel.blue()*2 && pixel.green()>pixel.red()*.4 : pixel.red()>pixel.green()*2,
-         "native close uses gold on red/pink presets and red on emerald/amber, in hover and press with any glow");
+   check(blueClose ? pixel.blue()>pixel.red()*2 && pixel.blue()>pixel.green()*1.4
+                  : pixel.red()>pixel.blue()*2 && (warmClose ? pixel.green()>pixel.blue()*2 && pixel.green()>pixel.red()*.4 : pixel.red()>pixel.green()*2),
+         "native close uses blue on amber, gold on red/pink and red on emerald, in hover and press with any glow");
   }
  }
  auto *activeTitle=tabs->widget(0)->findChild<QComboBox *>(QStringLiteral("activeTitleText"));
@@ -385,5 +386,19 @@ int main(int argc,char **argv) {
  bool zeroLabel=false;
  for(auto *label:blur->parentWidget()->findChildren<QLabel *>()) zeroLabel |= label->text()==QStringLiteral("0 / 15");
  check(zeroLabel,"saved zero blur has a numeric label immediately after loading");
+ // The native fallback must retain Crystal's blue material under the same
+ // highlight/hover settings as the production-shader regression.
+ EmeraldGlass::MaterialConfig crystal; crystal.specular=.58f; crystal.hoverGlow=.88f;
+ for(qreal dpr : {1.,1.25,1.5,2.}) {
+  QImage image(QSize(qRound(40*dpr),qRound(36*dpr)),QImage::Format_ARGB32_Premultiplied);
+  image.setDevicePixelRatio(dpr); image.fill(QColor(26,82,97));
+  QPainter painter(&image);
+  EmeraldGlass::paintButtonGlass(&painter,QRectF(5,5,27,23),dpr,QColor("#a8e4f5"),1.02f,false,true,false,QPointF(18.5,16.5),crystal);
+  painter.end(); int white=0,samples=0;
+  for(int y=qRound(5*dpr);y<qRound(28*dpr);++y) for(int x=qRound(5*dpr);x<qRound(32*dpr);++x) {
+   const auto color=image.pixelColor(x,y); ++samples; white+=std::min({color.red(),color.green(),color.blue()})>205;
+  }
+  check(white<samples/50,"native Crystal hover keeps its blue tint without white washout");
+ }
  std::cout<<"PASS: blur config, first-page blur slider, frame-only mask, shader/standard blur handoff, unload, disable\n";
 }

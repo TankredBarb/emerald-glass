@@ -5,6 +5,9 @@
 /vendor/kwin-effects-glass/src/generated/
 CMakeUserPresets.json
 
+# Local generated wallpaper collection
+/wallpapers/
+
 # Local diagnostics and Python bytecode
 /*.log
 /shader-validation.json

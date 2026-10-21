@@ -26,7 +26,7 @@ int main(int argc,char **argv) {
     EGLConfig cfg; EGLint n; require(eglChooseConfig(d,attrs,&cfg,1,&n)&&n,"EGL config");
     EGLint ca[]={EGL_CONTEXT_MAJOR_VERSION,3,EGL_CONTEXT_MINOR_VERSION,3,EGL_CONTEXT_OPENGL_PROFILE_MASK,EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,EGL_NONE};
     EGLContext c=eglCreateContext(d,cfg,EGL_NO_CONTEXT,ca); require(c!=EGL_NO_CONTEXT,"EGL context");
-    EGLint pa[]={EGL_WIDTH,128,EGL_HEIGHT,128,EGL_NONE}; EGLSurface surf=eglCreatePbufferSurface(d,cfg,pa);
+    EGLint pa[]={EGL_WIDTH,256,EGL_HEIGHT,256,EGL_NONE}; EGLSurface surf=eglCreatePbufferSurface(d,cfg,pa);
     require(eglMakeCurrent(d,surf,surf,c),"EGL current"); std::cout<<glGetString(GL_RENDERER)<<'\n';
     std::ifstream f(argv[1]); std::string fragment((std::istreambuf_iterator<char>(f)),{});
     const std::string vertex="#version 330 core\nout vec2 uv; void main(){ vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2); uv=p; gl_Position=vec4(p*2.0-1.0,0,1); }";
@@ -45,7 +45,36 @@ int main(int argc,char **argv) {
     one("refraction",.85); one("tint",.7); one("dispersion",.25); one("adaptiveContrast",.35);
     one("frameRadius",5); one("titleHeight",39); one("scale",1); one("frameOpacity",.84);
     glUniform1i(loc("kwinMode"),1); glUniform1i(loc("hoverButton"),-1); glUniform1i(loc("pressedButton"),-1); glUniform1i(loc("buttonCloseIndex"),2);
-    auto render=[&](){ glClearColor(0,0,0,0); glClear(GL_COLOR_BUFFER_BIT); glDrawArrays(GL_TRIANGLES,0,3); std::vector<unsigned char> out(128*128*4); glReadPixels(0,0,128,128,GL_RGBA,GL_UNSIGNED_BYTE,out.data()); require(glGetError()==GL_NO_ERROR,"GL error"); return out; };
+    auto render=[&](int side=128){ glViewport(0,0,side,side); glClearColor(0,0,0,0); glClear(GL_COLOR_BUFFER_BIT); glDrawArrays(GL_TRIANGLES,0,3); std::vector<unsigned char> out(side*side*4); glReadPixels(0,0,side,side,GL_RGBA,GL_UNSIGNED_BYTE,out.data()); require(glGetError()==GL_NO_ERROR,"GL error"); return out; };
+    const std::array<std::array<float,3>,8> buttonPresets={{{23,245,89},{247,20,14},{20,168,68},{30,143,255},
+                                                          {255,158,20},{184,51,255},{168,228,245},{255,140,157}}};
+    if(argc>=4 && std::string(argv[2])=="--capture-buttons") {
+        const float backdrop[]={.10f,.32f,.38f,1.f};
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA32F,1,1,0,GL_RGBA,GL_FLOAT,backdrop);
+        count(3); glUniform1i(loc("buttonCloseIndex"),2);
+        glUniform4f(loc("buttonRect[0]"),15,8,27,23); glUniform4f(loc("buttonRect[1]"),45,8,27,23);
+        glUniform4f(loc("buttonRect[2]"),75,8,27,23);
+        one("frameOpacity",.32); one("tint",1.02); one("refraction",.45); one("dispersion",.60);
+        one("specularStrength",.58); one("hoverGlowStrength",.88); one("adaptiveContrast",.52);
+        for(int preset=0;preset<8;++preset) for(int state=0;state<4;++state) for(float dpr : {1.f,1.5f,2.f}) {
+            glUniform3f(loc("accent"),buttonPresets[preset][0]/255,buttonPresets[preset][1]/255,buttonPresets[preset][2]/255);
+            glUniform1i(loc("hoverButton"),state==1 ? 1 : state==2 ? 2 : -1);
+            glUniform1i(loc("pressedButton"),state==3 ? 2 : -1);
+            glUniform2f(loc("pointer"),state==1 ? 58.5f : 88.5f,19.5f); one("scale",dpr);
+            const int side=int(128*dpr); const auto pixels=render(side);
+            std::ofstream file(std::string(argv[3])+"/"+std::to_string(preset)+"-"+std::to_string(state)+"-"+std::to_string(int(dpr*100))+".ppm",std::ios::binary);
+            file<<"P6\n"<<side<<' '<<side<<"\n255\n";
+            for(int y=0;y<side;++y) for(int x=0;x<side;++x) {
+                const int i=((side-1-y)*side+x)*4;
+                for(int k=0;k<3;++k) {
+                    const unsigned char value=std::min(255,int(pixels[i+k])+int(backdrop[k]*(255-pixels[i+3])));
+                    file.write(reinterpret_cast<const char *>(&value),1);
+                }
+            }
+            require(bool(file),"button material capture saved");
+        }
+        return 0;
+    }
     count(0); one("specularStrength",0); one("hoverGlowStrength",0); auto noLight=render();
     one("specularStrength",1); auto spec=render(); require(spec!=noLight,"zero specular must differ from 100 percent");
     one("specularStrength",0); one("hoverGlowStrength",1); auto glow=render(); require(glow==noLight,"native cursor overlay must not be duplicated inside KWin material"); count(1); glUniform4f(loc("buttonRect[0]"),5,5,27,23); glUniform1i(loc("hoverButton"),0); one("hoverGlowStrength",0); auto darkButton=render(); one("hoverGlowStrength",1); require(render()!=darkButton,"GPU button hover remains responsive"); count(0); glUniform1i(loc("hoverButton"),-1);
@@ -201,13 +230,13 @@ int main(int argc,char **argv) {
     for(bool pressed : {false,true}) {
         glUniform1i(loc("hoverButton"),pressed ? -1 : 0); glUniform1i(loc("pressedButton"),pressed ? 0 : -1);
         const auto redClose=render();
-        require(redClose[buttonPixel]>redClose[buttonPixel+1]*2 && redClose[buttonPixel]>redClose[buttonPixel+2]*2,
-                "GPU close hover and press stay clearly red over green at zero tint and glow");
+        require(redClose[buttonPixel]>redClose[buttonPixel+1]+20 && redClose[buttonPixel]>redClose[buttonPixel+2]+20,
+                "GPU close hover and press retain a red center over green at zero tint and glow");
     }
     for(const auto &baseColor : {std::array<float,4>{.97f,.08f,.055f,1},
                                 std::array<float,4>{1,.55f,.62f,1},
                                 std::array<float,4>{.47f,.13f,.18f,1},
-                                std::array<float,4>{1,.62f,.08f,0},
+                                std::array<float,4>{1,.62f,.08f,2},
                                 std::array<float,4>{.09f,.96f,.35f,0}}) {
         glUniform3f(loc("accent"),baseColor[0],baseColor[1],baseColor[2]);
         for(bool pressed : {false,true}) for(float glow : {0.f,1.f}) {
@@ -215,9 +244,12 @@ int main(int argc,char **argv) {
             glUniform1i(loc("hoverButton"),pressed ? -1 : 0); glUniform1i(loc("pressedButton"),pressed ? 0 : -1);
             const auto pixels=render();
             const int r=pixels[buttonPixel],g=pixels[buttonPixel+1],b=pixels[buttonPixel+2];
-            require(r>b*2,"GPU close warning keeps a warm visible color");
-            require(baseColor[3]>0 ? g>b*2 && g>r*.4 : r>g*2,
-                    "GPU close uses gold on red/pink and red on emerald/amber across hover/press and glow settings");
+            // Colored glass transmits this deliberately bright green backdrop.
+            // Require a visible channel margin rather than an opaque 2:1 fill.
+            constexpr int signalMargin=12;
+            require(baseColor[3]==2 ? b>r+signalMargin && b>g+signalMargin
+                                   : r>b+signalMargin && (baseColor[3]>0 ? g>b+signalMargin && g>r*.4 : r>g+signalMargin),
+                    "GPU close uses blue on amber, gold on red/pink and red on emerald across hover/press and glow settings");
         }
     }
     glUniform3f(loc("accent"),.1,.9,.3); one("hoverGlowStrength",0);
@@ -282,6 +314,56 @@ int main(int argc,char **argv) {
             one("frameOpacity",1); capture(render(),"-opaque.ppm");
         }
         std::cout<<"Sheet outer-edge refraction delta="<<edgeDelta<<'\n';
+    }
+    // The user's Crystal settings exposed white hover washout and a clipped
+    // Close body. Check the real shader at native and fractional pixel scales.
+    const float tealBackdrop[]={.10f,.32f,.38f,1.f};
+    glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA32F,1,1,0,GL_RGBA,GL_FLOAT,tealBackdrop);
+    glUniform2f(loc("resolution"),128,128); glUniform4f(loc("frameRect"),0,0,128,128);
+    glUniform4f(loc("contentRect"),8,40,112,80); count(3);
+    glUniform1i(loc("kwinMode"),1); glUniform1i(loc("opticsDisabled"),0); glUniform1i(loc("buttonCloseIndex"),2);
+    glUniform4f(loc("buttonRect[0]"),15,8,27,23); glUniform4f(loc("buttonRect[1]"),45,8,27,23);
+    glUniform4f(loc("buttonRect[2]"),75,8,27,23);
+    one("frameOpacity",.32); one("tint",1.02); one("refraction",.45); one("dispersion",.60);
+    one("specularStrength",.58); one("hoverGlowStrength",.88); one("adaptiveContrast",.52);
+    for(const auto &color : buttonPresets) for(float dpr : {1.f,1.25f,1.5f,2.f}) {
+        glUniform3f(loc("accent"),color[0]/255,color[1]/255,color[2]/255); one("scale",dpr);
+        const int side=int(128*dpr);
+        glUniform2f(loc("pointer"),88.5,19.5);
+        glUniform1i(loc("hoverButton"),-1); glUniform1i(loc("pressedButton"),-1);
+        const auto idle=render(side);
+        for(bool pressed : {false,true}) {
+            glUniform1i(loc("hoverButton"),pressed ? -1 : 2); glUniform1i(loc("pressedButton"),pressed ? 2 : -1);
+            const auto image=render(side);
+            int saturated=0,samples=0;
+            for(int y=0;y<side;++y) for(int x=0;x<side;++x) {
+                const int i=((side-1-y)*side+x)*4;
+                const float lx=(x+.5f)/dpr,ly=(y+.5f)/dpr;
+                if(lx>=76 && lx<101 && ly>=9 && ly<30) { ++samples; saturated+=std::max({image[i],image[i+1],image[i+2]})>=254; }
+                if(lx<74 || lx>103 || ly<7 || ly>32) for(int k=0;k<4;++k)
+                    require(image[i+k]==idle[i+k],"Close hover/press must not paint outside its lens");
+            }
+            require(saturated<samples/20,"Close lighting must retain its gradient instead of clipping into a flat plate");
+        }
+        const float emptyBackdrop[]={0,0,0,0};
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA32F,1,1,0,GL_RGBA,GL_FLOAT,emptyBackdrop);
+        one("frameOpacity",.2); one("specularStrength",1.5); one("hoverGlowStrength",1.5);
+        glUniform1i(loc("hoverButton"),2); glUniform1i(loc("pressedButton"),-1);
+        const auto partial=render(side);
+        for(int i=0;i<int(partial.size());i+=4) for(int k=0;k<3;++k)
+            require(partial[i+k]<=partial[i+3]+1,"bright button edges must retain premultiplied coverage");
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA32F,1,1,0,GL_RGBA,GL_FLOAT,tealBackdrop);
+        one("frameOpacity",.32); one("specularStrength",.58); one("hoverGlowStrength",.88);
+        if(color==buttonPresets[6]) {
+            glUniform2f(loc("pointer"),58.5,19.5);
+            glUniform1i(loc("pressedButton"),-1); glUniform1i(loc("hoverButton"),1);
+            const auto image=render(side); int white=0,samples=0;
+            for(int y=int(8*dpr);y<int(31*dpr);++y) for(int x=int(45*dpr);x<int(72*dpr);++x) {
+                const int i=((side-1-y)*side+x)*4; ++samples;
+                white+=std::min({image[i],image[i+1],image[i+2]})>205;
+            }
+            require(white<samples/50,"Crystal hover must preserve its blue tint rather than washing out white");
+        }
     }
     std::cout<<"PASS: material controls, caption adaptation without tint, dark caption preservation, lower-window blur isolation, optics-off neutral blur and six-layer alpha preservation\n";
 }

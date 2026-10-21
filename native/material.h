@@ -216,13 +216,16 @@ inline Vec3 boostTint(Vec3 color, Vec3 accent, float strength)
     return mix3(color, target, amount);
 }
 
-// Red/pink materials need a distinct warm warning color for Close feedback.
+// Close feedback contrasts with red/pink and gold materials.
 inline Vec3 closeButtonAccent(Vec3 base)
 {
     const float peak = std::max({base.x, base.y, base.z});
     const float chroma = peak - std::min({base.x, base.y, base.z});
     const bool redFamily = base.x == peak && chroma > peak * 0.1f
         && std::abs(base.y - base.z) <= chroma * 0.5f;
+    const bool goldFamily = base.x == peak && base.y > peak * 0.45f
+        && base.y < peak * 0.85f && base.z < peak * 0.25f;
+    if (goldFamily) return {0.06f, 0.36f, 1.0f};
     return redFamily ? Vec3{1.0f, 0.70f, 0.12f} : Vec3{0.92f, 0.08f, 0.04f};
 }
 
@@ -488,6 +491,9 @@ inline void paintButtonGlass(QPainter *p,
     const bool closeFeedback = isCloseButton && (hovered || pressed);
     const Math::Vec3 baseAccent{float(accentColor.redF()), float(accentColor.greenF()), float(accentColor.blueF())};
     const Math::Vec3 accent = closeFeedback ? Math::closeButtonAccent(baseAccent) : baseAccent;
+    const float restrainedLight = closeFeedback ? 0.35f
+        : Math::smoothstep(0.40f, 0.70f, std::min({baseAccent.x, baseAccent.y, baseAccent.z}));
+    const Math::Vec3 lightingAccent = closeFeedback ? Math::mix3(baseAccent, accent, 0.20f) : accent;
     constexpr float hx = -0.2073f;
     constexpr float hy = -0.3524f;
     constexpr float hz = 0.9124f;
@@ -539,7 +545,8 @@ inline void paintButtonGlass(QPainter *p,
             color = Math::mix3(color, {accent.x * 0.45f, accent.y * 0.45f, accent.z * 0.45f}, baseTint * 0.20f);
             color = Math::boostTint(color, accent, tintStrength);
             if (closeFeedback) {
-                color = Math::mix3(color, {accent.x * 0.65f, accent.y * 0.65f, accent.z * 0.65f}, 0.75f);
+                const float depth = Math::smoothstep(0.0f, 4.0f, std::max(-d, 0.0f));
+                color = Math::mix3(color, {accent.x * 0.65f, accent.y * 0.65f, accent.z * 0.65f}, 0.35f * depth);
             }
 
             const float ndoth = std::max(nx * hx + ny * hy + nz * hz, 0.0f);
@@ -552,16 +559,18 @@ inline void paintButtonGlass(QPainter *p,
             color.y *= edgeBoost;
             color.z *= edgeBoost;
 
-            const Math::Vec3 specTint = Math::mix3({1.0f, 1.0f, 1.0f}, accent, 0.18f);
-            const float specAdd = specular * 0.65f + fresnel * 0.25f;
+            const Math::Vec3 specTint = Math::mix3({1.0f, 1.0f, 1.0f}, lightingAccent, Math::mixf(0.18f, 0.65f, restrainedLight));
+            const float specAdd = specular * Math::mixf(0.65f, 0.30f, restrainedLight)
+                + fresnel * Math::mixf(0.25f, 0.12f, restrainedLight);
             color.x += specTint.x * specAdd;
             color.y += specTint.y * specAdd;
             color.z += specTint.z * specAdd;
 
             const float cArg = (d + 0.65f * invScale) * scale / 0.48f;
             const float contour = std::exp(-cArg * cArg);
-            const Math::Vec3 contourColor = Math::mix3(accent, {1.0f, 1.0f, 1.0f}, std::max(directionalEdge, 0.0f) * 0.7f);
-            color = Math::mix3(color, contourColor, contour * 0.82f);
+            const Math::Vec3 contourColor = Math::mix3(lightingAccent, {1.0f, 1.0f, 1.0f},
+                std::max(directionalEdge, 0.0f) * Math::mixf(0.7f, 0.25f, restrainedLight));
+            color = Math::mix3(color, contourColor, contour * Math::mixf(0.82f, 0.60f, restrainedLight));
 
             const float lArg = (d + 1.65f * invScale) * scale / 0.65f;
             const float darkLip = std::exp(-lArg * lArg);
@@ -570,22 +579,23 @@ inline void paintButtonGlass(QPainter *p,
             color.y *= lipMul;
             color.z *= lipMul;
 
-            // Button lens profile (exact match to glass.frag lines 83-92)
+            // Keep button reflection/hover lighting in sync with buttonMaterial().
             const float relY = (y - by) / std::max(bh, 1.0f);
             const float pressDim = pressed ? 0.55f : 0.68f;
             color.x *= pressDim;
             color.y *= pressDim;
             color.z *= pressDim;
 
-            const Math::Vec3 topHighlight = Math::mix3(accent, {1.0f, 1.0f, 1.0f}, 0.75f);
-            const float topFactor = (1.0f - Math::smoothstep(0.05f, 0.5f, relY)) * (pressed ? 0.13f : 0.34f);
+            const Math::Vec3 topHighlight = Math::mix3(lightingAccent, {1.0f, 1.0f, 1.0f}, Math::mixf(0.75f, 0.25f, restrainedLight));
+            const float topFactor = (1.0f - Math::smoothstep(0.05f, 0.5f, relY))
+                * (pressed ? 0.13f : Math::mixf(0.34f, 0.20f, restrainedLight));
             color.x += topHighlight.x * topFactor + accent.x * 0.11f;
             color.y += topHighlight.y * topFactor + accent.y * 0.11f;
             color.z += topHighlight.z * topFactor + accent.z * 0.11f;
 
             if (hovered) {
                 const float distPtr = std::hypot(x - float(pointer.x()), y - float(pointer.y()));
-                const float glow = std::exp(-distPtr / 24.0f) * 0.55f * cfg.hoverGlow;
+                const float glow = std::exp(-distPtr / 24.0f) * Math::mixf(0.55f, 0.22f, restrainedLight) * cfg.hoverGlow;
                 const Math::Vec3 glowColor = accent;
                 color.x += glowColor.x * glow;
                 color.y += glowColor.y * glow;

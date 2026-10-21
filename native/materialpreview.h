@@ -31,10 +31,11 @@ struct PreviewFrame {
 
 class MaterialPreview : public QWidget, protected QOpenGLFunctions_3_3_Core {
 public:
-    explicit MaterialPreview(QWidget *parent = nullptr, const QString &shaderPath = {});
+    explicit MaterialPreview(QWidget *parent = nullptr, const QString &shaderPath = {}, int closePreviewStyle = -1);
     ~MaterialPreview() override;
     void setConfig(const MaterialConfig &cfg);
     void setEffectAvailable(bool available);
+    void setClosePreviewState(int state);
     QImage grabFramebuffer();
     QImage renderDecorationFrame(const QSizeF &size, qreal dpr, const PreviewFrame &frame);
 
@@ -53,6 +54,8 @@ private:
     PreviewFrame sampleFrame(const QRectF &frame, bool active) const;
 
     QString m_shaderPath;
+    int m_closePreviewStyle = -1;
+    int m_closePreviewState = -1;
     MaterialConfig m_cfg;
     bool m_effectAvailable = false;
     QPointF m_pointer{-100.0, -100.0};

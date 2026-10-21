@@ -23,6 +23,7 @@
 #ifdef HAS_MATERIAL_PREVIEW
 #include "../native/materialpreview.h"
 int runSheetComparison(QApplication &app);
+int runCloseComparison(QApplication &app);
 #include <KCModule>
 #include <KPluginFactory>
 #include <KPluginMetaData>
@@ -318,6 +319,7 @@ int main(int argc, char **argv)
     QSurfaceFormat::setDefaultFormat(format);
     QApplication app(argc, argv);
 #ifdef HAS_MATERIAL_PREVIEW
+    if (app.arguments().contains("--close-comparison")) return runCloseComparison(app);
     if (app.arguments().contains("--sheet-comparison")) return runSheetComparison(app);
     if (app.arguments().contains("--kcm-preview")) {
         auto result = KPluginFactory::instantiatePlugin<KCModule>(KPluginMetaData(QStringLiteral(KCM_PLUGIN_PATH)));

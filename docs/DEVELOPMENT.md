@@ -42,7 +42,37 @@ build/dev/emerald-glass-preview --material-preview
 build/dev/emerald-glass-preview --material-preview --verify-preview --blur 6
 build/dev/emerald-glass-preview --kcm-preview --verify-preview --blur 6
 build/dev/emerald-glass-preview --sheet-comparison
+build/dev/emerald-glass-preview --close-comparison
 ```
+
+Close comparison shows the previous material and three glass
+variants at native button size. Choose any preset and idle/hover/press, or use
+mouse hover; specular, glow and opacity controls apply to every row. It starts
+with saved material settings and never saves them. Style 3 (colored depth with
+preset-colored rim and reflections) is selected for the production shader and
+CPU fallback. The comparison overrides the style using a compile-time define
+to retain the other candidates for reference.
+
+```sh
+build/dev/emerald-glass-preview --close-comparison --preset amber --state 1 \
+  --capture /tmp/emerald-close-amber.png
+```
+
+`--state` accepts -1 (mouse hover), 0 (idle), 1 (hover) and 2 (press).
+Capture requires OpenGL and fails if only CPU fallback is available.
+
+To capture the production button material across all eight presets, idle/hover/
+pressed states and scales 1/1.5/2, create an output directory and run:
+
+```sh
+mkdir -p /tmp/emerald-buttons
+LIBGL_ALWAYS_SOFTWARE=1 build/dev/native/material-shader-test \
+  preview/glass.frag --capture-buttons /tmp/emerald-buttons
+```
+
+These PPM captures show material only, without native glyphs. The regression
+also checks scale 1.25, saturated Close lighting, Crystal white washout,
+premultiplied coverage and containment of hover/press changes inside the lens.
 
 The material preview shares the production GLSL and blur stages. The sheet
 comparison retains the previous material for reference. The standalone demo

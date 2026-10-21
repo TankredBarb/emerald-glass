@@ -20,9 +20,10 @@ static void initializeMaterialResources()
 
 namespace EmeraldGlass {
 
-MaterialPreview::MaterialPreview(QWidget *parent, const QString &shaderPath)
+MaterialPreview::MaterialPreview(QWidget *parent, const QString &shaderPath, int closePreviewStyle)
     : QWidget(parent)
     , m_shaderPath(shaderPath.isEmpty() ? QStringLiteral(":/emeraldglass/preview/glass.frag") : shaderPath)
+    , m_closePreviewStyle(closePreviewStyle)
 {
     initializeMaterialResources();
     setMinimumHeight(180);
@@ -52,6 +53,12 @@ void MaterialPreview::setConfig(const MaterialConfig &cfg)
     update();
 }
 
+void MaterialPreview::setClosePreviewState(int state)
+{
+    m_closePreviewState = state;
+    update();
+}
+
 void MaterialPreview::setEffectAvailable(bool available)
 {
     if (m_effectAvailable != available) {
@@ -65,7 +72,10 @@ std::unique_ptr<QOpenGLShaderProgram> MaterialPreview::program(const char *path,
     auto result = std::make_unique<QOpenGLShaderProgram>();
     QFile file(QString::fromLatin1(path));
     if (!file.open(QIODevice::ReadOnly)) return {};
-    const QByteArray fragment = (preamble ? QByteArray("#version 330 core\nout vec4 fragColor;\n") : QByteArray()) + file.readAll();
+    QByteArray fragment = (preamble ? QByteArray("#version 330 core\nout vec4 fragColor;\n") : QByteArray()) + file.readAll();
+    if (!preamble && m_closePreviewStyle >= 0) {
+        fragment.insert(fragment.indexOf('\n') + 1, QByteArray("#define CLOSE_PREVIEW_STYLE ") + QByteArray::number(m_closePreviewStyle) + '\n');
+    }
     if (!result->addShaderFromSourceFile(QOpenGLShader::Vertex, QStringLiteral(":/emeraldglass/preview/fullscreen.vert")) ||
         !result->addShaderFromSourceCode(QOpenGLShader::Fragment, fragment) || !result->link()) {
         qWarning() << "Emerald Glass preview shader:" << result->log();
@@ -132,6 +142,11 @@ PreviewFrame MaterialPreview::sampleFrame(const QRectF &box, bool active) const
     };
     append(left, box.x() + 14);
     append(right, std::max(box.x() + 14, box.right() - groupWidth(right) - 17));
+    if (m_closePreviewState >= 0 && sample.closeButton >= 0) {
+        sample.hoverButton = m_closePreviewState == 1 ? sample.closeButton : -1;
+        sample.pressedButton = m_closePreviewState == 2 ? sample.closeButton : -1;
+        sample.pointer = m_closePreviewState > 0 ? sample.buttons[sample.closeButton].center() : QPointF(-100, -100);
+    }
     const qreal leftInset = left.isEmpty() ? 17 : 14 + groupWidth(left) + 10;
     const qreal rightInset = right.isEmpty() ? 17 : 17 + groupWidth(right) + 10;
     sample.titleRect = box.adjusted(leftInset, 0, -rightInset, 0);
@@ -358,7 +373,7 @@ void MaterialPreview::drawSample(QPainter &p, const QRectF &box, bool active, bo
         const QChar type = sample.buttonTypes[i];
         const bool hovered = b.contains(m_pointer);
         if (!gpu) paintButtonGlass(&p, b, dpr, m_cfg.colorForWindow(active), m_cfg.tintForWindow(active), i == sample.closeButton, hovered, false, m_pointer, m_cfg);
-        const QPointF c = b.center();
+        const QPointF c = b.center() + QPointF(0, i == sample.pressedButton ? 1 : 0);
         p.setPen(QPen(QColor("#effff6"), 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         p.setBrush(Qt::NoBrush);
         if (type == QLatin1Char('I')) p.drawLine(c + QPointF(-4, 3), c + QPointF(4, 3));
