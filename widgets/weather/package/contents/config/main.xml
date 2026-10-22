@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0">
+    <kcfgfile name=""/>
+    <group name="Location">
+        <entry name="provider" type="Int"><default>0</default><min>0</min><max>1</max></entry>
+        <entry name="locationName" type="String"><default>Одесса</default></entry>
+        <entry name="latitude" type="Double"><default>46.48572</default></entry>
+        <entry name="longitude" type="Double"><default>30.74383</default></entry>
+        <entry name="timeZone" type="String"><default>Europe/Kyiv</default></entry>
+        <entry name="refreshMinutes" type="Int"><default>30</default><min>15</min><max>120</max></entry>
+    </group>
+    <group name="Material">
+        <entry name="opticsEnabled" type="Bool"><default>true</default></entry>
+        <entry name="refraction" type="Int"><default>100</default><min>0</min><max>180</max></entry>
+        <entry name="dispersion" type="Int"><default>25</default><min>0</min><max>100</max></entry>
+        <entry name="specular" type="Int"><default>100</default><min>0</min><max>150</max></entry>
+        <entry name="hoverGlow" type="Int"><default>0</default><min>0</min><max>150</max></entry>
+        <entry name="blurRadius" type="Int"><default>20</default><min>0</min><max>100</max></entry>
+        <entry name="materialOpacity" type="Int"><default>40</default><min>0</min><max>100</max></entry>
+        <entry name="tintColor" type="Color"><default>#296b75</default></entry>
+        <entry name="tintStrength" type="Int"><default>20</default><min>0</min><max>100</max></entry>
+        <entry name="adaptiveContrast" type="Int"><default>100</default><min>0</min><max>100</max></entry>
+        <entry name="cornerRadius" type="Int"><default>20</default><min>0</min><max>40</max></entry>
+    </group>
+    <group name="Typography">
+        <entry name="textDefaultsInitialized" type="Bool"><default>false</default></entry>
+        <entry name="valueFont" type="Font"><default>sans-serif</default></entry>
+        <entry name="titleFont" type="Font"><default>sans-serif</default></entry>
+        <entry name="detailFont" type="Font"><default>sans-serif</default></entry>
+        <entry name="valueColor" type="Color"><default>#f5fcff</default></entry>
+        <entry name="titleColor" type="Color"><default>#e5f3f8</default></entry>
+        <entry name="detailColor" type="Color"><default>#b5c9d2</default></entry>
+    </group>
+</kcfg>

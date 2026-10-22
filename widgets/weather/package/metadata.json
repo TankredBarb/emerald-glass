@@ -1,0 +1,15 @@
+{
+    "KPlugin": {
+        "Id": "org.tankred.emerald.weather",
+        "Name": "Emerald Weather",
+        "Description": "Coordinate-based weather forecasts in Liquid Glass",
+        "Icon": "weather-few-clouds",
+        "Version": "0.2.4",
+        "License": "LGPL-3.0-or-later",
+        "Authors": [{"Name": "Tankred"}],
+        "Category": "Environment and Weather"
+    },
+    "KPackageStructure": "Plasma/Applet",
+    "X-Plasma-API-Minimum-Version": "6.0",
+    "X-Plasma-FormFactors": ["desktop"]
+}

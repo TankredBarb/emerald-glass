@@ -35,6 +35,19 @@ Keep standard **Blur** enabled for application content, panels, menus and other
 window decorations. Desktop-wide glass is a possible future direction, not a
 feature of this version.
 
+## Desktop widgets
+
+Two independent desktop plasmoids use the same Liquid Glass direction:
+
+- [Emerald System Monitor](widgets/systemmonitor/README.md): KDE sensors,
+  configurable grid, custom sensor names, fonts, colors and readable graphs.
+- [Emerald Weather](widgets/weather/README.md): coordinate-based forecasts,
+  Open-Meteo / MET Norway, location search and an extended daily forecast.
+
+They sample desktop wallpaper directly and have independent settings. Build
+and install them separately using their READMEs; `install.sh` installs the
+window decoration and companion effect. They do not replace KDE's applets.
+
 ## Requirements
 
 The supported target is **KDE Plasma 6 on Wayland**, using KDecoration3 and an

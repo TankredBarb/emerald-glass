@@ -2,8 +2,8 @@
 
 ## Original Emerald Glass source
 
-Unless a file carries another notice, original source in `native/`, `preview/`
-and `tests/`, root build/validation/installation scripts and project-authored
+Unless a file carries another notice, original source in `native/`, `preview/`,
+`widgets/` and `tests/`, root build/validation/installation scripts and project-authored
 documentation are licensed under **LGPL-3.0-or-later**. The full LGPLv3 text is
 in [LICENSE](LICENSE); its incorporated GPLv3 terms are in [COPYING](COPYING).
 The copyright holders authorize this license for the original Emerald Glass

@@ -1,0 +1,15 @@
+{
+    "KPlugin": {
+        "Id": "org.tankred.emerald.systemmonitor",
+        "Name": "Emerald System Monitor",
+        "Description": "Desktop system graphs in Liquid Glass",
+        "Icon": "utilities-system-monitor",
+        "Version": "0.6.2",
+        "License": "LGPL-3.0-or-later",
+        "Authors": [{ "Name": "Tankred" }],
+        "Category": "System Information"
+    },
+    "KPackageStructure": "Plasma/Applet",
+    "X-Plasma-API-Minimum-Version": "6.0",
+    "X-Plasma-FormFactors": ["desktop"]
+}
