@@ -45,6 +45,7 @@ Controls.Popup {
         refraction: popup.material?.refraction ?? 1
         dispersion: popup.material?.dispersion ?? 0.25
         specular: popup.material?.specular ?? 1
+        surfaceHoverEnabled: popup.material?.surfaceHoverEnabled ?? true
         hoverGlow: popup.material?.hoverGlow ?? 0
         blurRadius: popup.material?.blurRadius ?? 2
         materialOpacity: popup.material?.materialOpacity ?? 0.4

@@ -52,6 +52,7 @@ Item {
             glass.dispersion = 0.25
             glass.specular = 1
             glass.hoverGlow = 0
+            glass.surfaceHoverEnabled = true
             glass.blurRadius = 2
             glass.materialOpacity = 0.4
             glass.tintColor = "#296b75"
@@ -257,6 +258,44 @@ Item {
             wait(100)
             let second = pixel(grabImage(testScene), 32, 110)
             verify(second.b > first.b + 0.04, "Cursor must brighten the edge independently of highlights")
+        }
+        function test_cursor_glow_crosses_card_body() {
+            neutralMaterial()
+            glass.hoverGlow = 1
+            wait(100)
+            const idle = grabImage(testScene)
+            mouseMove(glass, 90, 80)
+            wait(100)
+            const left = grabImage(testScene)
+            verify(pixel(left, 120, 110).b > pixel(idle, 120, 110).b + 0.04,
+                "Cursor must light the interior away from the border")
+            mouseMove(glass, 190, 80)
+            wait(100)
+            const right = grabImage(testScene)
+            verify(pixel(right, 220, 110).b > pixel(left, 220, 110).b + 0.04,
+                "Interior light must follow the pointer")
+            compare(pixel(right, 120, 110), pixel(idle, 120, 110))
+            compare(pixel(right, 30, 30), pixel(idle, 30, 30))
+            glass.surfaceHoverEnabled = false
+            wait(100)
+            compare(pixel(grabImage(testScene), 220, 110), pixel(idle, 220, 110))
+            mouseMove(glass, 2, 80)
+            wait(100)
+            verify(pixel(grabImage(testScene), 32, 110).b > pixel(idle, 32, 110).b + 0.04,
+                "Disabling surface light must preserve border glow")
+            glass.surfaceHoverEnabled = true
+            mouseMove(glass, 190, 80)
+            glass.hoverGlow = 0
+            wait(100)
+            compare(pixel(grabImage(testScene), 220, 110), pixel(idle, 220, 110))
+            glass.hoverGlow = 1
+            glass.opticsEnabled = false
+            wait(100)
+            compare(pixel(grabImage(testScene), 220, 110), pixel(idle, 220, 110))
+            glass.opticsEnabled = true
+            mouseMove(testScene, 799, 479)
+            wait(100)
+            compare(pixel(grabImage(testScene), 220, 110), pixel(idle, 220, 110))
         }
     }
 }

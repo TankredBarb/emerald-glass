@@ -9,6 +9,7 @@ Item {
     property real refraction: 1.0
     property real dispersion: 0.25
     property real specular: 1.0
+    property bool surfaceHoverEnabled: true
     property real hoverGlow: 0.0
     property real blurRadius: 2.0
     property real materialOpacity: 0.40
@@ -90,6 +91,7 @@ Item {
         property real dispersion: card.opticsEnabled ? card.dispersion : 0
         property real specular: card.opticsEnabled ? card.specular : 0
         property real hoverGlow: card.opticsEnabled ? card.hoverGlow : 0
+        property real surfaceHover: card.surfaceHoverEnabled ? 1 : 0
         property real blurRadius: card.blurRadius
         property real materialOpacity: card.materialOpacity
         property color tintColor: card.tintColor

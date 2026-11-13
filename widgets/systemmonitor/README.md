@@ -56,7 +56,11 @@ Open the widget's **Configure → Liquid Glass** page to adjust refraction,
 dispersion, edge highlights, cursor glow, blur, material opacity, tint color
 and strength, adaptive contrast, and corner radius. The preview updates as
 you edit. **Apply** saves settings for that widget and updates its desktop
-card without restarting Plasma. **Restore first-version appearance** resets
+card without restarting Plasma.
+**Cursor glow across the surface** enables the cursor light inside the card;
+disable it to retain only the border glow. **Cursor glow** sets the strength
+of both effects. The surface switch is enabled by default.
+**Restore first-version appearance** resets
 the pending settings to the original appearance; use Apply to save the reset.
 Disabling Liquid Glass optics retains the configured tint, opacity and blur,
 while disabling refraction, dispersion, highlights and cursor glow.

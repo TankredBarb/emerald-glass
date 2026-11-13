@@ -15,6 +15,7 @@ layout(std140, binding = 0) uniform buf {
     float dispersion;
     float specular;
     float hoverGlow;
+    float surfaceHover;
     float blurRadius;
     float materialOpacity;
     vec4 tintColor;
@@ -77,6 +78,10 @@ void main()
     color *= 1.0 - exp(-pow((depth - 2.5) / 1.8, 2.0)) * (1.0 - facing) * 0.12 * specular;
     float halo = exp(-length(p - pointer) / 80.0);
     color += mix(vec3(1.0), accent, 0.5) * halo * (rim * 0.35 + shoulder * 0.12) * hoverGlow;
+    // Match the decoration's cursor light across the sheet as well as the rim.
+    float cursorGlow = max(1.0 - length(p - pointer) / 60.0, 0.0);
+    color = mix(color, mix(accent, vec3(1.0), 0.45),
+                cursorGlow * surfaceHover * clamp(0.28 * hoverGlow, 0.0, 0.55));
     float alpha = coverage * qt_Opacity;
     fragColor = vec4(clamp(color, 0.0, 1.0) * alpha, alpha);
 }

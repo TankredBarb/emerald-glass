@@ -13,6 +13,7 @@ KCMUtils.SimpleKCM {
     property alias cfg_refraction: refraction.value
     property alias cfg_dispersion: dispersion.value
     property alias cfg_specular: specular.value
+    property alias cfg_surfaceHoverEnabled: surfaceHover.checked
     property alias cfg_hoverGlow: hoverGlow.value
     property alias cfg_blurRadius: blur.value
     property alias cfg_materialOpacity: materialOpacity.value
@@ -26,6 +27,7 @@ KCMUtils.SimpleKCM {
         cfg_refraction = 100
         cfg_dispersion = 25
         cfg_specular = 100
+        cfg_surfaceHoverEnabled = true
         cfg_hoverGlow = 0
         cfg_blurRadius = 20
         cfg_materialOpacity = 40
@@ -80,6 +82,7 @@ KCMUtils.SimpleKCM {
                 refraction: page.cfg_refraction / 100
                 dispersion: page.cfg_dispersion / 100
                 specular: page.cfg_specular / 100
+                surfaceHoverEnabled: page.cfg_surfaceHoverEnabled
                 hoverGlow: page.cfg_hoverGlow / 100
                 blurRadius: page.cfg_blurRadius / 10
                 materialOpacity: page.cfg_materialOpacity / 100
@@ -97,79 +100,133 @@ KCMUtils.SimpleKCM {
             }
         }
 
-        Kirigami.FormLayout {
+        GridLayout {
             Layout.fillWidth: true
-            Controls.CheckBox {
-                id: optics
-                text: qsTr("Liquid Glass optics")
-                checked: true
+            columns: 2
+            columnSpacing: Kirigami.Units.largeSpacing
+            rowSpacing: Kirigami.Units.smallSpacing
+            ColumnLayout {
+                Layout.columnSpan: 2
+                spacing: 0
+                Controls.CheckBox {
+                    id: optics
+                    text: qsTr("Liquid Glass optics")
+                    checked: true
+                }
+                Controls.CheckBox {
+                    id: surfaceHover
+                    text: qsTr("Cursor glow across the surface")
+                    enabled: optics.checked
+                    checked: true
+                }
+            }
+            Controls.Label {
+                id: refractionLabel
+                text: qsTr("Refraction:")
+                Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
             }
             EffectSlider {
                 id: refraction
-                Kirigami.FormData.label: qsTr("Refraction:")
-                accessibleName: Kirigami.FormData.label
+                objectName: "refractionControl"
+                accessibleName: refractionLabel.text
                 enabled: optics.checked
                 to: 180
                 value: 100
             }
+            Controls.Label {
+                id: dispersionLabel
+                text: qsTr("Dispersion:")
+                Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+            }
             EffectSlider {
                 id: dispersion
-                Kirigami.FormData.label: qsTr("Dispersion:")
-                accessibleName: Kirigami.FormData.label
+                accessibleName: dispersionLabel.text
                 enabled: optics.checked
                 value: 25
             }
+            Controls.Label {
+                id: specularLabel
+                text: qsTr("Edge highlights:")
+                Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+            }
             EffectSlider {
                 id: specular
-                Kirigami.FormData.label: qsTr("Edge highlights:")
-                accessibleName: Kirigami.FormData.label
+                accessibleName: specularLabel.text
                 enabled: optics.checked
                 to: 150
                 value: 100
             }
+            Controls.Label {
+                id: hoverGlowLabel
+                text: qsTr("Cursor glow:")
+                Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+            }
             EffectSlider {
                 id: hoverGlow
-                Kirigami.FormData.label: qsTr("Cursor glow:")
-                accessibleName: Kirigami.FormData.label
+                accessibleName: hoverGlowLabel.text
                 enabled: optics.checked
                 to: 150
                 value: 0
             }
+            Controls.Label {
+                id: blurLabel
+                text: qsTr("Blur:")
+                Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+            }
             EffectSlider {
                 id: blur
-                Kirigami.FormData.label: qsTr("Blur:")
-                accessibleName: Kirigami.FormData.label
+                accessibleName: blurLabel.text
                 to: 100
                 value: 20
             }
+            Controls.Label {
+                id: materialOpacityLabel
+                text: qsTr("Material opacity:")
+                Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+            }
             EffectSlider {
                 id: materialOpacity
-                Kirigami.FormData.label: qsTr("Material opacity:")
-                accessibleName: Kirigami.FormData.label
+                accessibleName: materialOpacityLabel.text
                 value: 40
+            }
+            Controls.Label {
+                id: tintColorLabel
+                text: qsTr("Tint color:")
+                Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
             }
             KQuickControls.ColorButton {
                 id: tintColor
-                Kirigami.FormData.label: qsTr("Tint color:")
                 color: "#296b75"
                 showAlphaChannel: false
             }
+            Controls.Label {
+                id: tintLabel
+                text: qsTr("Tint strength:")
+                Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+            }
             EffectSlider {
                 id: tint
-                Kirigami.FormData.label: qsTr("Tint strength:")
-                accessibleName: Kirigami.FormData.label
+                accessibleName: tintLabel.text
                 value: 20
+            }
+            Controls.Label {
+                id: contrastLabel
+                text: qsTr("Adaptive contrast:")
+                Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
             }
             EffectSlider {
                 id: contrast
-                Kirigami.FormData.label: qsTr("Adaptive contrast:")
-                accessibleName: Kirigami.FormData.label
+                accessibleName: contrastLabel.text
                 value: 100
+            }
+            Controls.Label {
+                id: cornersLabel
+                text: qsTr("Corner radius:")
+                Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
             }
             EffectSlider {
                 id: corners
-                Kirigami.FormData.label: qsTr("Corner radius:")
-                accessibleName: Kirigami.FormData.label
+                accessibleName: cornersLabel.text
                 to: 40
                 value: 20
                 suffix: qsTr("px")

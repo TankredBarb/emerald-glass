@@ -86,6 +86,23 @@ int main(int argc,char **argv) {
  d->setSettings(settings); d->create();
  QObject::connect(d.get(),&Decoration::nextStateChanged,d.get(),[&](const auto &state){d->apply(state);});
  check(d->init(),"decoration initializes");
+ auto checkSection=[&](QPointF point,Qt::WindowFrameSection section,const char *message) {
+  QHoverEvent event(QEvent::HoverMove,point,point,QPointF(-1,-1));
+  QCoreApplication::sendEvent(d.get(),&event);
+  check(d->sectionUnderMouse()==section,message);
+ };
+ checkSection(QPointF(d->size().width()/2,2),Qt::TopSection,"top edge allows vertical resize");
+ checkSection(QPointF(2,2),Qt::TopLeftSection,"top left corner allows diagonal resize");
+ checkSection(QPointF(d->size().width()-2,2),Qt::TopRightSection,"top right corner allows diagonal resize");
+ checkSection(QPointF(d->size().width()/2,20),Qt::TitleBarArea,"titlebar interior still moves the window");
+ bridge.client->maximizedHorizontally=bridge.client->maximizedVertically=true;
+ d->window()->maximizedChanged(true);
+ checkSection(QPointF(d->size().width()/2,2),Qt::TitleBarArea,"maximized titlebar reaches the screen edge");
+ bridge.client->maximizedHorizontally=bridge.client->maximizedVertically=false;
+ d->window()->maximizedChanged(false);
+ checkSection(QPointF(d->size().width()/2,2),Qt::TopSection,"restoring the window restores top resize");
+ QHoverEvent leave(QEvent::HoverLeave,QPointF(-1,-1),QPointF(-1,-1),QPointF(-1,-1));
+ QCoreApplication::sendEvent(d.get(),&leave);
  check(!d->property("egPreview").toBool(),"live bridge does not enable local preview rendering");
  check(!EmeraldGlass::loadMaterialConfig().desktopBackdropForMaximized,"desktop backdrop defaults off");
  for(bool enabled : {true,false}) {

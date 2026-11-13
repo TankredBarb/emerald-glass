@@ -38,6 +38,7 @@ PlasmoidItem {
         material.refraction: Plasmoid.configuration.refraction / 100
         material.dispersion: Plasmoid.configuration.dispersion / 100
         material.specular: Plasmoid.configuration.specular / 100
+        material.surfaceHoverEnabled: Plasmoid.configuration.surfaceHoverEnabled
         material.hoverGlow: Plasmoid.configuration.hoverGlow / 100
         material.blurRadius: Plasmoid.configuration.blurRadius / 10
         material.materialOpacity: Plasmoid.configuration.materialOpacity / 100

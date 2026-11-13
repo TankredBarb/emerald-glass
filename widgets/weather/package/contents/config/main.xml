@@ -14,6 +14,7 @@
         <entry name="refraction" type="Int"><default>100</default><min>0</min><max>180</max></entry>
         <entry name="dispersion" type="Int"><default>25</default><min>0</min><max>100</max></entry>
         <entry name="specular" type="Int"><default>100</default><min>0</min><max>150</max></entry>
+        <entry name="surfaceHoverEnabled" type="Bool"><default>true</default></entry>
         <entry name="hoverGlow" type="Int"><default>0</default><min>0</min><max>150</max></entry>
         <entry name="blurRadius" type="Int"><default>20</default><min>0</min><max>100</max></entry>
         <entry name="materialOpacity" type="Int"><default>40</default><min>0</min><max>100</max></entry>

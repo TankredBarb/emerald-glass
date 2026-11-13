@@ -92,6 +92,10 @@ Item {
             // The popup uses the same per-widget transparent glass settings.
             compare(popup.background.materialOpacity, 0)
             compare(popup.background.blurRadius, 0)
+            card.material.surfaceHoverEnabled = false
+            compare(popup.background.surfaceHoverEnabled, false)
+            card.material.surfaceHoverEnabled = true
+            compare(popup.background.surfaceHoverEnabled, true)
             keyClick(Qt.Key_Escape)
             tryCompare(popup, "opened", false)
             tryCompare(popup, "visible", false)

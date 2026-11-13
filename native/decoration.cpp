@@ -512,7 +512,9 @@ private:
             state->setBorders(QMarginsF(side, top, side, bottom));
             state->setBorderRadius(KDecoration3::BorderRadius(radius()));
         });
-        setTitleBar(QRectF(0.0, 0.0, rect().width(), top));
+        // KDecoration treats the frame outside titleBar as resize handles.
+        const qreal resizeTop = maximized ? 0.0 : 5.0;
+        setTitleBar(QRectF(side, resizeTop, std::max(0.0, rect().width() - 2.0 * side), top - resizeTop));
         layoutButtons();
     }
 

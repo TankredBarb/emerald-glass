@@ -29,6 +29,7 @@ Item {
             settings.cfg_refraction = 155
             settings.cfg_dispersion = 70
             settings.cfg_specular = 125
+            settings.cfg_surfaceHoverEnabled = false
             settings.cfg_hoverGlow = 80
             settings.cfg_blurRadius = 60
             settings.cfg_materialOpacity = 85
@@ -40,6 +41,9 @@ Item {
             compare(preview.refraction, 1.55)
             compare(preview.dispersion, 0.7)
             compare(preview.specular, 1.25)
+            compare(preview.surfaceHoverEnabled, false)
+            settings.cfg_surfaceHoverEnabled = true
+            compare(preview.surfaceHoverEnabled, true)
             compare(preview.hoverGlow, 0.8)
             compare(preview.blurRadius, 6)
             compare(preview.materialOpacity, 0.85)
@@ -54,12 +58,14 @@ Item {
             settings.cfg_specular = 0
             settings.cfg_tintColor = "red"
             settings.cfg_opticsEnabled = false
+            settings.cfg_surfaceHoverEnabled = false
             settings.restoreDefaults()
             let preview = findChild(settings, "effectsPreview")
             compare(preview.opticsEnabled, true)
             compare(preview.refraction, 1)
             compare(preview.dispersion, 0.25)
             compare(preview.specular, 1)
+            compare(preview.surfaceHoverEnabled, true)
             compare(preview.hoverGlow, 0)
             compare(preview.blurRadius, 2)
             compare(preview.materialOpacity, 0.4)
@@ -67,6 +73,18 @@ Item {
             compare(preview.tintStrength, 0.2)
             compare(preview.adaptiveContrast, 1)
             compare(preview.cornerRadius, 20)
+        }
+        function test_sliders_fill_available_width() {
+            const slider = findChild(settings, "refractionControl")
+            verify(slider !== null)
+            scene.width = 620
+            wait(100)
+            const originalWidth = slider.width
+            const originalX = slider.mapToItem(scene, 0, 0).x
+            scene.width = 920
+            wait(100)
+            verify(slider.width > originalWidth + 250, "Slider must grow with the settings page")
+            compare(slider.mapToItem(scene, 0, 0).x, originalX)
         }
         function test_preview_and_controls_fit_narrow_page() {
             scene.width = 440

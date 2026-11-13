@@ -26,7 +26,10 @@ Unavailable values display a dash rather than zero.
 **Liquid Glass** configures the same refraction, dispersion, highlights, glow,
 blur, opacity, tint and corner radius as the monitor. Each widget has independent
 settings. The material samples the actual desktop wallpaper and follows moves
-and wallpaper changes. Zero material opacity and zero blur are supported.
+and wallpaper changes. **Cursor glow across the surface** enables the interior
+cursor light; disabling it keeps the border glow. **Cursor glow** adjusts the
+strength of both effects. The surface switch is enabled by default.
+Zero material opacity and zero blur are supported.
 **Text** configures fonts, sizes, styles and colors for temperature, city name,
 and details/forecast. Larger fonts increase the minimum card height. The extended
 forecast measures columns using the configured font and values; if they exceed
