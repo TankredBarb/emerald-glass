@@ -3,7 +3,7 @@
     <kcfgfile name=""/>
     <group name="Location">
         <entry name="provider" type="Int"><default>0</default><min>0</min><max>1</max></entry>
-        <entry name="locationName" type="String"><default>Одесса</default></entry>
+        <entry name="locationName" type="String"><default>Odesa</default></entry>
         <entry name="latitude" type="Double"><default>46.48572</default></entry>
         <entry name="longitude" type="Double"><default>30.74383</default></entry>
         <entry name="timeZone" type="String"><default>Europe/Kyiv</default></entry>

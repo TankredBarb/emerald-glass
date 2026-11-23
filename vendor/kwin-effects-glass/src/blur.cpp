@@ -24,6 +24,11 @@
 #include "scene/scene.h"
 #include "scene/surfaceitem.h"
 #include "scene/windowitem.h"
+#ifdef GLASS_KWIN_68
+#include "compositor.h"
+#include "scene/itemrenderer.h"
+#include "scene/workspacescene.h"
+#endif
 #if defined(GLASS_X11) || !defined(GLASS_KWIN_67)
 #include "wayland/blur.h"
 #include "wayland/contrast.h"
@@ -1078,7 +1083,15 @@ bool BlurEffect::renderDesktopBackdrop(GLFramebuffer *framebuffer, const QRect &
     }
     for (auto *desktop : desktops) {
         WindowPaintData data;
+#ifdef GLASS_KWIN_68
+        auto *renderer = effects->scene()->renderer(Compositor::self()->primaryDevice());
+        if (!renderer->renderItem(target, viewport, desktop->windowItem(), 0, Region(viewport.deviceRect()), data, {}, {})) {
+            EglContext::currentContext()->popFramebuffer();
+            return false;
+        }
+#else
         effects->renderWindow(target, viewport, desktop, 0, Region(viewport.deviceRect()), data);
+#endif
     }
     EglContext::currentContext()->popFramebuffer();
     return true;
@@ -1655,13 +1668,42 @@ bool BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
         materialShader->setUniform("frameRect", QVector4D(materialFrame.x(), materialFrame.y(), materialFrame.width(), materialFrame.height()));
         materialShader->setUniform("contentRect", localRect(emeraldDecoration->property("egContent").toRectF()));
 
+        static constexpr const char *kButtonRectNames[12] = {
+            "buttonRect[0]", "buttonRect[1]", "buttonRect[2]", "buttonRect[3]",
+            "buttonRect[4]", "buttonRect[5]", "buttonRect[6]", "buttonRect[7]",
+            "buttonRect[8]", "buttonRect[9]", "buttonRect[10]", "buttonRect[11]"
+        };
+        static constexpr const char *kButtonRadiiNames[12] = {
+            "buttonRadii[0]", "buttonRadii[1]", "buttonRadii[2]", "buttonRadii[3]",
+            "buttonRadii[4]", "buttonRadii[5]", "buttonRadii[6]", "buttonRadii[7]",
+            "buttonRadii[8]", "buttonRadii[9]", "buttonRadii[10]", "buttonRadii[11]"
+        };
+        static constexpr const char *kButtonColorNames[12] = {
+            "buttonColor[0]", "buttonColor[1]", "buttonColor[2]", "buttonColor[3]",
+            "buttonColor[4]", "buttonColor[5]", "buttonColor[6]", "buttonColor[7]",
+            "buttonColor[8]", "buttonColor[9]", "buttonColor[10]", "buttonColor[11]"
+        };
+        static constexpr const char *kButtonColorMetaNames[12] = {
+            "buttonColorMeta[0]", "buttonColorMeta[1]", "buttonColorMeta[2]", "buttonColorMeta[3]",
+            "buttonColorMeta[4]", "buttonColorMeta[5]", "buttonColorMeta[6]", "buttonColorMeta[7]",
+            "buttonColorMeta[8]", "buttonColorMeta[9]", "buttonColorMeta[10]", "buttonColorMeta[11]"
+        };
         const auto buttons = emeraldDecoration->property("egButtons").toList();
+        const auto buttonRadii = emeraldDecoration->property("egButtonRadii").toList();
+        const auto buttonColors = emeraldDecoration->property("egButtonColors").toList();
+        const auto buttonColorMeta = emeraldDecoration->property("egButtonColorMeta").toList();
         const int btnCount = std::min<int>(buttons.size(), 12);
+        materialShader->setUniform("buttonShape", emeraldDecoration->property("egButtonShape").toInt());
         materialShader->setUniform("buttonCount", btnCount);
         materialShader->setUniform("buttonCloseIndex", emeraldDecoration->property("egCloseButton").toInt());
         for (int i = 0; i < btnCount; ++i) {
-            const QByteArray name = QByteArray("buttonRect[") + QByteArray::number(i) + ']';
-            materialShader->setUniform(name.constData(), localRect(buttons.value(i).toRectF()));
+            materialShader->setUniform(kButtonRectNames[i], localRect(buttons.value(i).toRectF()));
+            const QVector4D rad = i < buttonRadii.size() ? buttonRadii.value(i).value<QVector4D>() : QVector4D(3, 3, 3, 3);
+            materialShader->setUniform(kButtonRadiiNames[i], rad);
+            const QVector4D col = i < buttonColors.size() ? buttonColors.value(i).value<QVector4D>() : QVector4D(0, 0, 0, 0);
+            materialShader->setUniform(kButtonColorNames[i], col);
+            const QVector4D meta = i < buttonColorMeta.size() ? buttonColorMeta.value(i).value<QVector4D>() : QVector4D(0, 0, 0, 0);
+            materialShader->setUniform(kButtonColorMetaNames[i], meta);
         }
 
         const QColor accent = emeraldDecoration->property("egColor").value<QColor>();

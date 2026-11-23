@@ -32,8 +32,14 @@ port of Apple's implementation.
 
 The companion effect draws **only Emerald Glass window borders and buttons**.
 Keep standard **Blur** enabled for application content, panels, menus and other
-window decorations. Desktop-wide glass is a possible future direction, not a
-feature of this version.
+window decorations.
+
+A separate, opt-in [Plasma desktop integration](desktop/README.md) adds LG and
+adaptive or manual text colors to native Plasma popups without editing applets.
+It is experimental and currently disabled following severe live-session
+performance degradation with open popups.
+It has its own build, settings and activation procedure; panels and ordinary
+application windows remain outside its current scope.
 
 ## Desktop widgets
 

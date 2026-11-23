@@ -365,5 +365,139 @@ int main(int argc,char **argv) {
             require(white<samples/50,"Crystal hover must preserve its blue tint rather than washing out white");
         }
     }
+    // Verify all 5 button shapes in GPU shader: valid premultiplied output,
+    // distinct geometry/appearance, joined-seam isolation, and StealthLens idle vs hover.
+    {
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA32F,1,1,0,GL_RGBA,GL_FLOAT,tealBackdrop);
+        glUniform3f(loc("accent"),0.09f,0.96f,0.35f);
+        one("scale",1.0f); one("frameOpacity",.75f); one("tint",.7f); one("refraction",.85f);
+        one("dispersion",.25f); one("specularStrength",1.0f); one("hoverGlowStrength",1.0f);
+        count(3); glUniform1i(loc("buttonCloseIndex"),2);
+        glUniform1i(loc("hoverButton"),-1); glUniform1i(loc("pressedButton"),-1);
+        auto setRects=[&](const std::array<std::array<float,4>,3> &rects, const std::array<std::array<float,4>,3> &radii) {
+            for(int j=0;j<3;++j) {
+                const std::string rn="buttonRect["+std::to_string(j)+"]";
+                const std::string radn="buttonRadii["+std::to_string(j)+"]";
+                glUniform4f(loc(rn.c_str()),rects[j][0],rects[j][1],rects[j][2],rects[j][3]);
+                glUniform4f(loc(radn.c_str()),radii[j][0],radii[j][1],radii[j][2],radii[j][3]);
+            }
+        };
+        glUniform1i(loc("buttonShape"),0);
+        setRects({{{20,8,27,23},{50,8,27,23},{80,8,27,23}}}, {{{3,3,3,3},{3,3,3,3},{3,3,3,3}}});
+        const auto classic=render(128);
+
+        glUniform1i(loc("buttonShape"),1);
+        setRects({{{15,8,26,23},{41,8,26,23},{67,8,35,23}}}, {{{5,0.5f,0.5f,5},{0.5f,0.5f,0.5f,0.5f},{0.5f,5,5,0.5f}}});
+        const auto joinedIdle=render(128);
+        glUniform1i(loc("hoverButton"),2); glUniform2f(loc("pointer"),84.5f,19.5f);
+        const auto joinedCloseHover=render(128);
+        glUniform1i(loc("hoverButton"),-1);
+
+        glUniform1i(loc("buttonShape"),2);
+        setRects({{{15,1,26,23},{41,1,26,23},{67,1,35,23}}}, {{{0.5f,0.5f,0.5f,5.5f},{0.5f,0.5f,0.5f,0.5f},{0.5f,0.5f,5.5f,0.5f}}});
+        const auto topDocked=render(128);
+
+        glUniform1i(loc("buttonShape"),3);
+        setRects({{{14,8,29,22},{47,8,29,22},{80,8,29,22}}}, {{{11,11,11,11},{11,11,11,11},{11,11,11,11}}});
+        const auto capsules=render(128);
+
+        glUniform1i(loc("buttonShape"),4);
+        setRects({{{20,8,27,23},{50,8,27,23},{80,8,27,23}}}, {{{5,5,5,5},{5,5,5,5},{5,5,5,5}}});
+        const auto stealthIdle=render(128);
+        glUniform1i(loc("hoverButton"),1); glUniform2f(loc("pointer"),63.5f,19.5f);
+        const auto stealthHover=render(128);
+        glUniform1i(loc("hoverButton"),-1);
+
+        for(const auto &img : {classic,joinedIdle,joinedCloseHover,topDocked,capsules,stealthIdle,stealthHover}) {
+            for(int i=0;i<int(img.size());i+=4) for(int k=0;k<3;++k)
+                require(img[i+k]<=img[i+3]+1,"all button shapes maintain premultiplied RGBA output");
+        }
+        require(joinedIdle!=classic && topDocked!=classic && capsules!=classic && stealthIdle!=classic,
+                "each button shape renders distinctly from Classic");
+        require(stealthIdle!=stealthHover,"StealthLens changes appearance on hover");
+        // JoinedStrip Close hover must not bleed left across x=67 into Maximize,
+        // and the shared seam at x=66..67 must remain fully opaque (no semi-transparent crack).
+        for(int y=8;y<31;++y) for(int x=42;x<66;++x) {
+            const int i=((127-y)*128+x)*4;
+            for(int k=0;k<4;++k)
+                require(joinedCloseHover[i+k]==joinedIdle[i+k],"JoinedStrip Close hover does not bleed across its left seam");
+        }
+        for(int x : {66,67}) {
+            const int i=((127-19)*128+x)*4;
+            require(joinedIdle[i+3]>=250 && joinedCloseHover[i+3]>=250,
+                    "JoinedStrip shared seam stays opaque without anti-aliased gap");
+        }
+    }
+    // Verify improved HSV Close accent and all 5 ButtonColorMode uniform modes in GPU shader.
+    {
+        glUniform1i(loc("buttonShape"),0);
+        glUniform1i(loc("buttonCloseIndex"),2);
+        count(3);
+        for(int j=0;j<3;++j) {
+            const std::string rn="buttonRect["+std::to_string(j)+"]";
+            const std::string radn="buttonRadii["+std::to_string(j)+"]";
+            const std::string cn="buttonColor["+std::to_string(j)+"]";
+            const std::string mn="buttonColorMeta["+std::to_string(j)+"]";
+            glUniform4f(loc(rn.c_str()),20+j*30.0f,8,27,23);
+            glUniform4f(loc(radn.c_str()),3,3,3,3);
+            glUniform4f(loc(cn.c_str()),0,0,0,0);
+            glUniform4f(loc(mn.c_str()),0,0,0,0);
+        }
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA32F,1,1,0,GL_RGBA,GL_FLOAT,tealBackdrop);
+        one("scale",1.0f); one("frameOpacity",.75f); one("tint",.7f); one("refraction",.85f);
+        one("dispersion",.25f); one("specularStrength",1.0f); one("hoverGlowStrength",0.0f);
+        glUniform1i(loc("hoverButton"),2); glUniform1i(loc("pressedButton"),-1);
+        glUniform2f(loc("pointer"),93.5f,19.5f);
+        const int clsPx=((127-19)*128+93)*4;
+        // Hot Pink #ff1493 -> warm gold Close
+        glUniform3f(loc("accent"),1.0f,0.08f,0.58f);
+        const auto pinkClose=render(128);
+        require(pinkClose[clsPx]>pinkClose[clsPx+2]+30 && pinkClose[clsPx+1]>pinkClose[clsPx+2]+15,
+                "GPU Close uses warm gold on Hot Pink theme");
+        // Bright Orange #ff5500 -> cobalt blue Close
+        glUniform3f(loc("accent"),1.0f,0.33f,0.0f);
+        const auto orangeClose=render(128);
+        require(orangeClose[clsPx+2]>orangeClose[clsPx]+30 && orangeClose[clsPx+2]>orangeClose[clsPx+1]+20,
+                "GPU Close uses cobalt blue on Bright Orange theme");
+
+        // Compare all 5 ButtonColorMode outputs when idle via buttonColor + buttonColorMeta uniforms.
+        glUniform1i(loc("hoverButton"),-1);
+        glUniform3f(loc("accent"),0.09f,0.96f,0.35f);
+        auto uploadColorMode=[&](int mode, const std::array<std::array<float,4>,3> &cols, const std::array<std::array<float,4>,3> &metas) {
+            (void)mode;
+            for(int j=0;j<3;++j) {
+                const std::string cn="buttonColor["+std::to_string(j)+"]";
+                const std::string mn="buttonColorMeta["+std::to_string(j)+"]";
+                glUniform4f(loc(cn.c_str()),cols[j][0],cols[j][1],cols[j][2],cols[j][3]);
+                glUniform4f(loc(mn.c_str()),metas[j][0],metas[j][1],metas[j][2],metas[j][3]);
+            }
+            return render(128);
+        };
+        const auto monoIdle=uploadColorMode(0, {{{0.09f,0.96f,0.35f,1.0f},{0.09f,0.96f,0.35f,1.0f},{0.09f,0.96f,0.35f,1.0f}}},
+                                               {{{0.7f,0,0,0},{0.7f,0,0,0},{0.7f,0,0,0}}});
+        const auto alwaysCloseIdle=uploadColorMode(1, {{{0.09f,0.96f,0.35f,1.0f},{0.09f,0.96f,0.35f,1.0f},{0.92f,0.08f,0.06f,1.24f}}},
+                                                      {{{0.7f,0,0,0},{0.7f,0,0,0},{0.9f,0.3f,0.32f,0}}});
+        const auto jewelIdle=uploadColorMode(2, {{{0.95f,0.65f,0.11f,1.28f},{0.11f,0.80f,0.95f,1.28f},{0.95f,0.11f,0.16f,1.28f}}},
+                                                {{{0.95f,0.55f,0.28f,0},{0.95f,0.55f,0.28f,0},{0.95f,0.55f,0.28f,0}}});
+        const auto harmonicIdle=uploadColorMode(3, {{{0.11f,0.95f,0.28f,1.18f},{0.11f,0.95f,0.85f,1.18f},{0.96f,0.13f,0.60f,1.28f}}},
+                                                   {{{0.88f,0.65f,0.26f,0},{0.88f,0.65f,0.26f,0},{0.95f,0.55f,0.26f,0}}});
+        const auto smokedIdle=uploadColorMode(4, {{{0.51f,0.70f,0.62f,1.0f},{0.51f,0.70f,0.62f,1.0f},{0.51f,0.70f,0.62f,1.0f}}},
+                                                 {{{0.45f,1.0f,0.48f,0},{0.45f,1.0f,0.48f,0},{0.45f,1.0f,0.48f,0}}});
+        for(const auto &img : {monoIdle,alwaysCloseIdle,jewelIdle,harmonicIdle,smokedIdle}) {
+            for(int i=0;i<int(img.size());i+=4) for(int k=0;k<3;++k)
+                require(img[i+k]<=img[i+3]+1,"all button color modes maintain premultiplied RGBA output");
+        }
+        require(alwaysCloseIdle!=monoIdle && jewelIdle!=monoIdle && harmonicIdle!=monoIdle && smokedIdle!=monoIdle,
+                "each button color mode renders distinctly from Monochrome in GPU shader");
+
+        // Verify StealthLens idle uses effectiveTint & customFill even when global tint == 0.
+        glUniform1i(loc("buttonShape"),4);
+        one("tint",0.0f);
+        const auto stealthMonoZero=uploadColorMode(0, {{{0.09f,0.96f,0.35f,1.0f},{0.09f,0.96f,0.35f,1.0f},{0.09f,0.96f,0.35f,1.0f}}},
+                                                      {{{0.0f,0,0,0},{0.0f,0,0,0},{0.0f,0,0,0}}});
+        const auto stealthJewelZero=uploadColorMode(2, {{{0.95f,0.65f,0.11f,1.28f},{0.11f,0.80f,0.95f,1.28f},{0.95f,0.11f,0.16f,1.28f}}},
+                                                       {{{0.95f,0.55f,0.28f,0},{0.95f,0.55f,0.28f,0},{0.95f,0.55f,0.28f,0}}});
+        require(stealthJewelZero!=stealthMonoZero,"StealthLens idle respects per-button effectiveTint and fillBoost when global tint is zero");
+    }
     std::cout<<"PASS: material controls, caption adaptation without tint, dark caption preservation, lower-window blur isolation, optics-off neutral blur and six-layer alpha preservation\n";
 }

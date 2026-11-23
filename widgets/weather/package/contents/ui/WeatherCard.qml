@@ -10,7 +10,7 @@ Item {
     function showForecast() { forecastPopup.open() }
     property var weather
     property Item wallpaper
-    property string cityName: "Одесса"
+    property string cityName: "Odesa"
     property alias material: glass
     property font valueFont: Qt.font({family: "sans-serif", pixelSize: 44, weight: Font.DemiBold})
     property font titleFont: Qt.font({family: "sans-serif", pixelSize: 16, weight: Font.DemiBold})

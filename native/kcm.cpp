@@ -161,6 +161,24 @@ public:
         m_titleAlignCombo->addItem(QStringLiteral("Centered across window"), 2);
         geomForm->addRow(QStringLiteral("Title alignment:"), m_titleAlignCombo);
 
+        m_buttonShapeCombo = new QComboBox(geomGroup);
+        m_buttonShapeCombo->setObjectName(QStringLiteral("buttonShape"));
+        m_buttonShapeCombo->addItem(QStringLiteral("Classic Emerald"), int(ButtonShape::Classic));
+        m_buttonShapeCombo->addItem(QStringLiteral("Joined Strip"), int(ButtonShape::JoinedStrip));
+        m_buttonShapeCombo->addItem(QStringLiteral("Top-Docked Tabs"), int(ButtonShape::TopDockedTabs));
+        m_buttonShapeCombo->addItem(QStringLiteral("Liquid Capsules"), int(ButtonShape::LiquidCapsules));
+        m_buttonShapeCombo->addItem(QStringLiteral("Stealth Lens"), int(ButtonShape::StealthLens));
+        geomForm->addRow(QStringLiteral("Button shape:"), m_buttonShapeCombo);
+
+        m_buttonColorModeCombo = new QComboBox(geomGroup);
+        m_buttonColorModeCombo->setObjectName(QStringLiteral("buttonColorMode"));
+        m_buttonColorModeCombo->addItem(QStringLiteral("Monochrome (Match Titlebar)"), int(ButtonColorMode::Monochrome));
+        m_buttonColorModeCombo->addItem(QStringLiteral("Always-Tinted Close"), int(ButtonColorMode::AlwaysTintedClose));
+        m_buttonColorModeCombo->addItem(QStringLiteral("Adaptive Jewel Trio"), int(ButtonColorMode::AdaptiveJewelTrio));
+        m_buttonColorModeCombo->addItem(QStringLiteral("Harmonic HSL"), int(ButtonColorMode::HarmonicHsl));
+        m_buttonColorModeCombo->addItem(QStringLiteral("Smoked Chrome"), int(ButtonColorMode::SmokedChrome));
+        geomForm->addRow(QStringLiteral("Button colors:"), m_buttonColorModeCombo);
+
         m_useSystemButtonsCheck = new QCheckBox(QStringLiteral("Use KWin system titlebar button layout (left and right)"), geomGroup);
         geomForm->addRow(QString(), m_useSystemButtonsCheck);
 
@@ -197,6 +215,8 @@ public:
             connect(sp, &QSpinBox::valueChanged, this, &EmeraldGlassConfigModule::onUiEdited);
         }
         connect(m_titleAlignCombo, &QComboBox::currentIndexChanged, this, &EmeraldGlassConfigModule::onUiEdited);
+        connect(m_buttonShapeCombo, &QComboBox::currentIndexChanged, this, &EmeraldGlassConfigModule::onUiEdited);
+        connect(m_buttonColorModeCombo, &QComboBox::currentIndexChanged, this, &EmeraldGlassConfigModule::onUiEdited);
         connect(m_useSystemButtonsCheck, &QCheckBox::toggled, this, &EmeraldGlassConfigModule::onUiEdited);
         connect(m_shaderCheck, &QCheckBox::toggled, this, &EmeraldGlassConfigModule::onUiEdited);
         connect(m_desktopBackdropCheck, &QCheckBox::toggled, this, &EmeraldGlassConfigModule::onUiEdited);
@@ -327,6 +347,8 @@ private:
         m_borderWidthSpin->setValue(cfg.borderWidth);
         m_cornerRadiusSpin->setValue(cfg.cornerRadius);
         m_titleAlignCombo->setCurrentIndex(std::clamp(cfg.titleAlignment, 0, 2));
+        m_buttonShapeCombo->setCurrentIndex(std::max(0, m_buttonShapeCombo->findData(cfg.buttonShape)));
+        m_buttonColorModeCombo->setCurrentIndex(std::max(0, m_buttonColorModeCombo->findData(cfg.buttonColorMode)));
         m_useSystemButtonsCheck->setChecked(cfg.useSystemButtons);
 
         updateButtonSwatches();
@@ -356,6 +378,8 @@ private:
         m_working.borderWidth = m_borderWidthSpin->value();
         m_working.cornerRadius = m_cornerRadiusSpin->value();
         m_working.titleAlignment = m_titleAlignCombo->currentData().toInt();
+        m_working.buttonShape = m_buttonShapeCombo->currentData().toInt();
+        m_working.buttonColorMode = m_buttonColorModeCombo->currentData().toInt();
         m_working.useSystemButtons = m_useSystemButtonsCheck->isChecked();
     }
 
@@ -401,6 +425,8 @@ private:
     QSpinBox *m_borderWidthSpin = nullptr;
     QSpinBox *m_cornerRadiusSpin = nullptr;
     QComboBox *m_titleAlignCombo = nullptr;
+    QComboBox *m_buttonShapeCombo = nullptr;
+    QComboBox *m_buttonColorModeCombo = nullptr;
     QCheckBox *m_useSystemButtonsCheck = nullptr;
 };
 

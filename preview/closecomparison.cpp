@@ -14,7 +14,7 @@ int runCloseComparison(QApplication &app)
     QWidget host;
     host.setWindowTitle(QStringLiteral("Emerald Glass — Close material comparison"));
     auto *layout = new QVBoxLayout(&host);
-    layout->addWidget(new QLabel(QStringLiteral("Close: одинаковые настройки и фон во всех строках · слева active, справа inactive · кнопки 27×23")));
+    layout->addWidget(new QLabel(QStringLiteral("Close: identical settings and background in every row · active on the left, inactive on the right · buttons 27×23")));
     auto cfg = EmeraldGlass::loadMaterialConfig();
     cfg.shaderEffectEnabled = true;
     cfg.useSystemButtons = false;
@@ -26,26 +26,26 @@ int runCloseComparison(QApplication &app)
     for (const auto &color : EmeraldGlass::kColorPresets)
         preset->addItem(QString::fromLatin1(color.name), QString::fromLatin1(color.id));
     preset->setCurrentIndex(std::max(0, preset->findData(initialPreset)));
-    controls->addWidget(new QLabel(QStringLiteral("Тема")));
+    controls->addWidget(new QLabel(QStringLiteral("Theme")));
     controls->addWidget(preset);
     auto *state = new QComboBox;
-    state->addItem(QStringLiteral("Мышь: hover"), -1);
+    state->addItem(QStringLiteral("Mouse: hover"), -1);
     state->addItem(QStringLiteral("Idle"), 0);
     state->addItem(QStringLiteral("Hover Close"), 1);
     state->addItem(QStringLiteral("Press Close"), 2);
     const int stateArg = args.indexOf(QStringLiteral("--state"));
     const int initialState = stateArg >= 0 && stateArg + 1 < args.size() ? args[stateArg + 1].toInt() : 1;
     state->setCurrentIndex(std::max(0, state->findData(initialState)));
-    controls->addWidget(new QLabel(QStringLiteral("Состояние")));
+    controls->addWidget(new QLabel(QStringLiteral("State")));
     controls->addWidget(state);
     controls->addStretch();
     layout->addLayout(controls);
     std::array<EmeraldGlass::MaterialPreview *, 4> previews;
     const std::array<const char *, 4> labels = {{
-        "0 · Прежний — плотная заливка, ослабленные блики",
-        "1 · Мягкое стекло — 25% заливки, светлые отражения",
-        "2 · Насыщенное стекло — 45% заливки, светлые отражения",
-        "3 · Выбранный — цветная глубина, ободок и отражения в цвет темы"
+        "0 · Previous — dense fill, subdued highlights",
+        "1 · Soft glass — 25% fill, light reflections",
+        "2 · Rich glass — 45% fill, light reflections",
+        "3 · Selected — colored depth, theme-colored rim and reflections"
     }};
     for (int i = 0; i < int(previews.size()); ++i) {
         layout->addWidget(new QLabel(QString::fromUtf8(labels[i])));
@@ -81,9 +81,9 @@ int runCloseComparison(QApplication &app)
         });
         layout->addLayout(row);
     };
-    addSlider(QStringLiteral("Блики %"), 150, cfg.specular);
+    addSlider(QStringLiteral("Specular %"), 150, cfg.specular);
     addSlider(QStringLiteral("Hover glow %"), 150, cfg.hoverGlow);
-    addSlider(QStringLiteral("Непрозрачность %"), 100, cfg.frameOpacity);
+    addSlider(QStringLiteral("Opacity %"), 100, cfg.frameOpacity);
     apply();
     host.resize(1040, 830);
     host.show();

@@ -11,7 +11,7 @@ KCMUtils.SimpleKCM {
     id: page
     title: qsTr("Location and provider")
     property alias cfg_provider: provider.currentIndex
-    property string cfg_locationName: "Одесса"
+    property string cfg_locationName: "Odesa"
     property double cfg_latitude: 46.48572
     property double cfg_longitude: 30.74383
     property alias cfg_timeZone: timeZone.text
@@ -53,7 +53,7 @@ KCMUtils.SimpleKCM {
             Controls.TextField {
                 id: query
                 Layout.fillWidth: true
-                placeholderText: qsTr("For example: Одеса, Ізмаїл, Chișinău…")
+                placeholderText: qsTr("For example: Odesa, Izmail, Chișinău…")
                 onAccepted: search.searchLocations(text)
             }
             Controls.Button {

@@ -47,7 +47,7 @@ KCMUtils.SimpleKCM {
                 objectName: "textPreview"
                 anchors.fill: parent
                 anchors.margins: 20
-                title: "Одесса"
+                title: "Odesa"
                 valueText: "18.0 °C"
                 detail: qsTr("Temperature")
                 accent: "#63e5ef"

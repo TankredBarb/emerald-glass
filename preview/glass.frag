@@ -8,6 +8,10 @@ uniform vec4 frameRect;
 uniform vec4 contentRect;
 uniform int buttonCount;
 uniform vec4 buttonRect[12];
+uniform vec4 buttonRadii[12];
+uniform vec4 buttonColor[12];
+uniform vec4 buttonColorMeta[12];
+uniform int buttonShape;
 uniform int buttonCloseIndex;
 uniform vec3 accent;
 uniform vec2 pointer;
@@ -40,6 +44,44 @@ float boxDistance(vec2 p, vec4 box, float radius)
     return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - radius;
 }
 
+float roundedBoxDistance(vec2 p, vec4 box, vec4 radii)
+{
+    vec2 halfSize = box.zw * 0.5;
+    vec2 rel = p - box.xy - halfSize;
+    float r = rel.y > 0.0
+        ? (rel.x > 0.0 ? radii.z : radii.w)
+        : (rel.x > 0.0 ? radii.y : radii.x);
+    r = min(r, min(halfSize.x, halfSize.y));
+    vec2 q = abs(rel) - halfSize + r;
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+
+vec4 effectiveButtonRadii(int button)
+{
+    vec4 r = buttonRadii[button];
+    if (max(max(r.x, r.y), max(r.z, r.w)) > 0.001) {
+        return r;
+    }
+    if (buttonShape == 3) return vec4(11.0);
+    if (buttonShape == 4) return vec4(5.0);
+    return vec4(3.0);
+}
+
+vec4 buttonEvalRect(int button, vec4 radii)
+{
+    vec4 rect = buttonRect[button];
+    if (buttonShape == 1 || buttonShape == 2) {
+        if (radii.w < 1.0) {
+            rect.x -= 4.0;
+            rect.z += 4.0;
+        }
+        if (radii.z < 1.0) {
+            rect.z += 4.0;
+        }
+    }
+    return rect;
+}
+
 float frameDistance(vec2 p)
 {
     float r = frameRadius >= 0.0 ? frameRadius : 5.0;
@@ -52,7 +94,9 @@ float frameDistance(vec2 p)
 
 float materialDistance(vec2 p, int button)
 {
-    return button < 0 ? frameDistance(p) : boxDistance(p, buttonRect[button], 3.0);
+    if (button < 0) return frameDistance(p);
+    vec4 radii = effectiveButtonRadii(button);
+    return roundedBoxDistance(p, buttonEvalRect(button, radii), radii);
 }
 
 vec4 sampleSceneRGBA(vec2 p)
@@ -76,9 +120,9 @@ vec4 sampleSceneRGBA(vec2 p)
 
 vec4 sampleScene(vec2 p)
 {
-    vec4 sample = sampleSceneRGBA(p);
+    vec4 sceneSample = sampleSceneRGBA(p);
     // Cached texels are premultiplied. Missing backdrop coverage is not black.
-    return vec4(sample.a > 0.0001 ? sample.rgb / sample.a : vec3(0.0), sample.a);
+    return vec4(sceneSample.a > 0.0001 ? sceneSample.rgb / sceneSample.a : vec3(0.0), sceneSample.a);
 }
 
 vec4 softBackground(vec2 p)
@@ -94,23 +138,43 @@ vec4 softBackground(vec2 p)
     return c;
 }
 
+vec3 rgbToHsv(vec3 c)
+{
+    float maxC = max(max(c.r, c.g), c.b);
+    float minC = min(min(c.r, c.g), c.b);
+    float d = maxC - minC;
+    float h = 0.0;
+    if (d > 0.0001) {
+        if (maxC == c.r) {
+            h = mod((c.g - c.b) / d, 6.0);
+        } else if (maxC == c.g) {
+            h = (c.b - c.r) / d + 2.0;
+        } else {
+            h = (c.r - c.g) / d + 4.0;
+        }
+        h *= 60.0;
+    }
+    float s = maxC > 0.0001 ? d / maxC : 0.0;
+    return vec3(h, s, maxC);
+}
+
 vec3 closeButtonAccent(vec3 base)
 {
-    float peak = max(max(base.r, base.g), base.b);
-    float chroma = peak - min(min(base.r, base.g), base.b);
-    bool redFamily = base.r == peak && chroma > peak * 0.1
-        && abs(base.g - base.b) <= chroma * 0.5;
-    bool goldFamily = base.r == peak && base.g > peak * 0.45
-        && base.g < peak * 0.85 && base.b < peak * 0.25;
-    if (goldFamily) return vec3(0.06, 0.36, 1.0);
-    return redFamily ? vec3(1.0, 0.70, 0.12) : vec3(0.92, 0.08, 0.04);
+    vec3 hsv = rgbToHsv(base);
+    if (hsv.y <= 0.15) return vec3(0.92, 0.08, 0.06);
+    if (hsv.x >= 305.0 || hsv.x < 18.0) return vec3(1.0, 0.70, 0.12);
+    if (hsv.x >= 18.0 && hsv.x < 52.0) return vec3(0.08, 0.40, 1.0);
+    return vec3(0.92, 0.08, 0.06);
 }
 
 vec4 buttonMaterial(vec2 p, float distance, int button)
 {
-    bool closeFeedback = button >= 0 && button == buttonCloseIndex
+    bool hasButtonColor = button >= 0 && buttonColor[button].a > 0.5;
+    bool closeFeedback = !hasButtonColor && button >= 0 && button == buttonCloseIndex
         && (button == hoverButton || button == pressedButton);
-    vec3 materialAccent = closeFeedback ? closeButtonAccent(accent) : accent;
+    vec3 materialAccent = hasButtonColor
+        ? buttonColor[button].rgb
+        : (closeFeedback ? closeButtonAccent(accent) : accent);
     // Pale glass and semantic Close feedback need headroom for the lens body.
     // Stacking white rim, top reflection and hover light used to clip them flat.
     float restrainedLight = closeFeedback ? 1.0 : smoothstep(0.40, 0.70, min(min(accent.r, accent.g), accent.b));
@@ -121,6 +185,15 @@ vec4 buttonMaterial(vec2 p, float distance, int button)
 #if CLOSE_PREVIEW_STYLE == 3
     if (closeFeedback) lightingAccent = mix(accent, materialAccent, 0.20);
 #endif
+    float customFill = 0.0;
+    float customTint = tint;
+    if (hasButtonColor) {
+        vec4 meta = buttonColorMeta[button];
+        restrainedLight = clamp(meta.z, 0.0, 1.0);
+        lightingAccent = mix(accent, materialAccent, clamp(meta.y, 0.0, 1.0));
+        customFill = max(buttonColor[button].a - 1.0, 0.0);
+        customTint = meta.x;
+    }
     float epsilon = 0.45;
     vec2 gradient = vec2(
         materialDistance(p + vec2(epsilon, 0.0), button) - materialDistance(p - vec2(epsilon, 0.0), button),
@@ -175,12 +248,14 @@ vec4 buttonMaterial(vec2 p, float distance, int button)
     float alpha = mix(clamp(frameOpacity, 0.0, 1.0), 1.0, background.a);
     background.rgb = mix(background.rgb, vec3(0.22, 0.2288, 0.2332), clamp(frameOpacity, 0.0, 1.0) / max(alpha, 0.0001));
 
-    float effectiveTint = closeFeedback ? 1.0 : clamp(tint, 0.0, 1.0) * (button < 0 ? frameOpacity : 1.0);
+    float effectiveTint = hasButtonColor
+        ? clamp(customTint, 0.0, 1.0)
+        : (closeFeedback ? 1.0 : clamp(tint, 0.0, 1.0) * (button < 0 ? frameOpacity : 1.0));
     vec3 color = background.rgb * mix(vec3(1.0), materialAccent * 0.8 + 0.2, effectiveTint * 0.65);
     color = mix(color, materialAccent * 0.45, effectiveTint * 0.16);
 
     // Extra tint strengthens the preset hue without lowering luminance or alpha.
-    float tintBoost = clamp(tint - 1.0, 0.0, 1.0);
+    float tintBoost = clamp((hasButtonColor ? customTint : tint) - 1.0, 0.0, 1.0);
     float tintLuma = dot(color, vec3(0.299, 0.587, 0.114));
     float accentLuma = dot(materialAccent, vec3(0.299, 0.587, 0.114));
     vec3 tintTarget = accentLuma <= 0.0001 ? vec3(tintLuma) : materialAccent * tintLuma / accentLuma;
@@ -189,7 +264,12 @@ vec4 buttonMaterial(vec2 p, float distance, int button)
     tintTarget = mix(vec3(tintLuma), tintTarget, tintGamut);
     color = mix(color, tintTarget, tintBoost);
 
-    if (closeFeedback) {
+    if (hasButtonColor) {
+        if (customFill > 0.001) {
+            float depth = smoothstep(0.0, 4.0, max(-distance, 0.0));
+            color = mix(color, materialAccent * 0.65, customFill * depth);
+        }
+    } else if (closeFeedback) {
 #if CLOSE_PREVIEW_STYLE == 1
         color = mix(color, materialAccent * 0.65, 0.25);
 #elif CLOSE_PREVIEW_STYLE == 2
@@ -214,10 +294,37 @@ vec4 buttonMaterial(vec2 p, float distance, int button)
     color += mix(vec3(1.0), lightingAccent, mix(0.18, 0.65, restrainedLight))
         * (specular * mix(0.65, 0.30, restrainedLight) + fresnel * mix(0.25, 0.12, restrainedLight));
 
+    vec4 radii = button >= 0 ? effectiveButtonRadii(button) : vec4(3.0);
+    bool joined = button >= 0 && (buttonShape == 1 || buttonShape == 2);
+    bool seamLeft = joined && radii.w < 1.0;
+    bool seamRight = joined && radii.z < 1.0;
+    bool topDocked = button >= 0 && buttonShape == 2;
+
     float contour = exp(-pow((distance + 0.65 / scale) * scale / 0.48, 2.0));
+    if (button >= 0 && buttonShape == 4 && button != hoverButton && button != pressedButton) {
+        float stealthTint = clamp(effectiveTint, 0.0, 1.0);
+        vec3 stealthColor = mix(background.rgb * 0.82, materialAccent * 0.35, stealthTint * 0.28 + customFill * 0.45);
+        vec3 stealthRim = mix(lightingAccent, vec3(1.0), 0.40);
+        stealthColor = mix(stealthColor, stealthRim, contour * 0.32);
+        float stealthAlpha = alpha * clamp(0.42 + customFill * 0.35, 0.0, 0.72);
+        return vec4(clamp(stealthColor, 0.0, 1.0), stealthAlpha);
+    }
+
     color = mix(color, mix(lightingAccent, vec3(1.0), max(directionalEdge, 0.0) * mix(0.7, 0.25, restrainedLight)),
                 contour * mix(0.82, 0.60, restrainedLight));
     float darkLip = exp(-pow((distance + 1.65 / scale) * scale / 0.65, 2.0));
+    if (button >= 0) {
+        vec4 rect = buttonRect[button];
+        if (seamLeft) {
+            darkLip *= smoothstep(0.0, 3.0, p.x - rect.x);
+        }
+        if (seamRight) {
+            darkLip *= smoothstep(0.0, 3.0, (rect.x + rect.z) - p.x);
+        }
+        if (topDocked) {
+            darkLip *= smoothstep(0.0, 3.0, p.y - rect.y);
+        }
+    }
     color *= 1.0 - darkLip * 0.24;
 
     // A narrow polished reflection along the titlebar, with transparent glass below.
@@ -241,11 +348,22 @@ vec4 buttonMaterial(vec2 p, float distance, int button)
         color += mix(materialAccent, vec3(1.0), 0.45) * rimGlow * 0.16 * glowScale;
     }
     if (button >= 0) {
-        float y = (p.y - buttonRect[button].y) / max(buttonRect[button].w, 1.0);
+        vec4 rect = buttonRect[button];
+        float y = (p.y - rect.y) / max(rect.w, 1.0);
         color *= pressed ? 0.55 : 0.68;
         color += mix(lightingAccent, vec3(1.0), mix(0.75, 0.25, restrainedLight))
             * (1.0 - smoothstep(0.05, 0.5, y)) * (pressed ? 0.13 : mix(0.34, 0.20, restrainedLight));
         color += materialAccent * 0.11;
+        if (seamLeft) {
+            float seamDist = (p.x - rect.x) * scale;
+            float divider = exp(-pow(seamDist / 0.9, 2.0));
+            color = mix(color, mix(lightingAccent, vec3(1.0), 0.55), divider * 0.35);
+        }
+        if (seamRight) {
+            float seamDist = ((rect.x + rect.z) - p.x) * scale;
+            float divider = exp(-pow(seamDist / 0.9, 2.0));
+            color *= 1.0 - divider * 0.38;
+        }
         if (button == hoverButton) {
             float glow = exp(-length(p - pointer) / 24.0);
             color += materialAccent * glow * mix(0.55, 0.22, restrainedLight) * glowScale;
@@ -360,8 +478,13 @@ vec4 emeraldMaterialMain()
         }
         for (int button = 0; button < 12; ++button) {
             if (button >= count) break;
-            float d = boxDistance(p, buttonRect[button], 3.0);
+            vec4 rect = buttonRect[button];
+            vec4 radii = effectiveButtonRadii(button);
+            float d = roundedBoxDistance(p, buttonEvalRect(button, radii), radii);
             float a = 1.0 - smoothstep(-0.65 / scale, 0.65 / scale, d);
+            bool joined = buttonShape == 1 || buttonShape == 2;
+            if (joined && radii.w < 1.0 && p.x < rect.x) a = 0.0;
+            if (joined && radii.z < 1.0 && p.x >= rect.x + rect.z) a = 0.0;
             if (a > 0.0) {
                 vec4 surface = material(p, d, button);
                 a *= surface.a;
@@ -379,9 +502,18 @@ vec4 emeraldMaterialMain()
     if (coverage > 0.0) color = mix(color, material(p, distance, -1).rgb, coverage);
     for (int button = 0; button < 12; ++button) {
         if (button >= count) break;
-        float d = boxDistance(p, buttonRect[button], 3.0);
+        vec4 rect = buttonRect[button];
+        vec4 radii = effectiveButtonRadii(button);
+        float d = roundedBoxDistance(p, buttonEvalRect(button, radii), radii);
         float a = 1.0 - smoothstep(-0.65 / scale, 0.65 / scale, d);
-        if (a > 0.0) color = mix(color, material(p, d, button).rgb, a);
+        bool joined = buttonShape == 1 || buttonShape == 2;
+        if (joined && radii.w < 1.0 && p.x < rect.x) a = 0.0;
+        if (joined && radii.z < 1.0 && p.x >= rect.x + rect.z) a = 0.0;
+        if (a > 0.0) {
+            vec4 surface = material(p, d, button);
+            float blendA = (buttonShape == 4 && button != hoverButton && button != pressedButton) ? a * surface.a : a;
+            color = mix(color, surface.rgb, blendA);
+        }
     }
     return vec4(color, 1.0);
 }

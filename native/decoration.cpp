@@ -16,6 +16,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QRadialGradient>
+#include <QVector4D>
 #include <memory>
 
 namespace EmeraldGlass {
@@ -30,6 +31,8 @@ public:
                                                   KDecoration3::Decoration *decoration,
                                                   QObject *parent);
     void paint(QPainter *p, const QRectF &repaintArea) override;
+    void setRadii(const ButtonRadii &radii) { m_radii = radii; }
+    ButtonRadii radii() const { return m_radii; }
 private:
     struct MaterialKey {
         MaterialConfig config;
@@ -38,13 +41,30 @@ private:
         QPointF pointer;
         qreal dpr = 1;
         float tint = 0;
+        ButtonRadii radii;
+        ButtonColorSpec colorSpec;
         bool hovered = false;
         bool pressed = false;
         bool operator==(const MaterialKey &) const = default;
     };
+    ButtonRadii m_radii;
     MaterialKey m_materialKey;
     QImage m_materialImage;
 };
+
+inline ButtonColorRole buttonColorRoleForType(KDecoration3::DecorationButtonType type)
+{
+    switch (type) {
+    case KDecoration3::DecorationButtonType::Minimize:
+        return ButtonColorRole::Minimize;
+    case KDecoration3::DecorationButtonType::Maximize:
+        return ButtonColorRole::Maximize;
+    case KDecoration3::DecorationButtonType::Close:
+        return ButtonColorRole::Close;
+    default:
+        return ButtonColorRole::Other;
+    }
+}
 
 class Decoration : public KDecoration3::Decoration {
     Q_OBJECT
@@ -65,6 +85,11 @@ public:
     {
         return property("egShader").toBool() && property("egTransformed").toBool() &&
             property("egDesktopBackdrop").toBool() && !property("egDesktopSnapshot").value<QImage>().isNull();
+    }
+    bool isOpticalTitle() const
+    {
+        return m_cfg.shaderEffectEnabled &&
+            (m_isPreview ? m_previewEffectEnabled : property("egShader").toBool());
     }
     bool isUsingShaderMaterial() const
     {
@@ -222,9 +247,7 @@ public:
 
             // Keep the chosen ink stable while deformation temporarily uses
             // the native material instead of the optical shader.
-            const bool opticalTitle = m_cfg.shaderEffectEnabled &&
-                (m_isPreview ? m_previewEffectEnabled : property("egShader").toBool());
-            const QColor titleColor = m_cfg.titleColorForWindow(window()->isActive(), opticalTitle);
+            const QColor titleColor = m_cfg.titleColorForWindow(window()->isActive(), isOpticalTitle());
             p->setPen(titleShadowColor(titleColor));
             p->drawText(drawRect.translated(0.0, 1.0), int(align), caption);
             p->setPen(titleColor);
@@ -244,15 +267,22 @@ public:
     void publish()
     {
         QVariantList geometry;
+        QVariantList radii;
+        QVariantList colors;
+        QVariantList colorMeta;
         int hover = -1;
         int pressed = -1;
         int closeIdx = -1;
+        const bool active = window() && window()->isActive();
+        const QColor windowAccent = currentAccentColor();
+        const float windowTint = currentTintStrength();
 
         auto collectButtons = [&](KDecoration3::DecorationButtonGroup *group) {
             if (!group) {
                 return;
             }
-            for (auto *btn : group->buttons()) {
+            for (auto *rawBtn : group->buttons()) {
+                auto *btn = static_cast<Button *>(rawBtn);
                 if (!btn->isVisible() || btn->type() == KDecoration3::DecorationButtonType::Spacer) {
                     continue;
                 }
@@ -261,6 +291,19 @@ public:
                     break;
                 }
                 geometry.append(btn->geometry());
+                const ButtonRadii r = btn->radii();
+                radii.append(QVector4D(r.tl, r.tr, r.br, r.bl));
+                const ButtonColorSpec spec = resolveButtonColor(
+                    windowAccent,
+                    windowTint,
+                    m_cfg.buttonColorMode,
+                    buttonColorRoleForType(btn->type()),
+                    btn->isHovered(),
+                    btn->isPressed(),
+                    active);
+                colors.append(QVector4D(float(spec.color.redF()), float(spec.color.greenF()),
+                                        float(spec.color.blueF()), 1.0f + spec.fillBoost));
+                colorMeta.append(QVector4D(spec.effectiveTint, spec.rimBlend, spec.restrainedLight, 0.0f));
                 if (btn->isHovered()) {
                     hover = idx;
                 }
@@ -281,6 +324,10 @@ public:
         setProperty("egDesktopBackdrop", m_cfg.desktopBackdropForMaximized &&
                     window() && window()->isActive() && window()->isMaximized());
         setProperty("egButtons", geometry);
+        setProperty("egButtonShape", m_cfg.buttonShape);
+        setProperty("egButtonRadii", radii);
+        setProperty("egButtonColors", colors);
+        setProperty("egButtonColorMeta", colorMeta);
         setProperty("egCloseButton", closeIdx);
         setProperty("egHover", hover);
         setProperty("egPressed", pressed);
@@ -362,10 +409,14 @@ private:
         frame.active = window()->isActive();
         frame.radius = radius();
         frame.pointer = m_pointer;
+        frame.buttonShape = m_cfg.buttonShape;
         frame.closeButton = property("egCloseButton").toInt();
         frame.hoverButton = property("egHover").toInt();
         frame.pressedButton = property("egPressed").toInt();
         for (const auto &button : property("egButtons").toList()) frame.buttons.append(button.toRectF());
+        for (const auto &r : property("egButtonRadii").toList()) frame.buttonRadii.append(r.value<QVector4D>());
+        for (const auto &c : property("egButtonColors").toList()) frame.buttonColors.append(c.value<QVector4D>());
+        for (const auto &m : property("egButtonColorMeta").toList()) frame.buttonColorMeta.append(m.value<QVector4D>());
         if (m_previewPending || (m_previewAttempted && m_previewSize == size && m_previewDpr == dpr &&
             m_previewConfig == m_cfg && m_previewFrame == frame)) return;
         m_previewPending = true;
@@ -475,6 +526,10 @@ private:
             btn->deleteLater();
         }
 
+        const qreal spacing = buttonSpacingForShape(m_cfg.buttonShape);
+        m_leftButtons->setSpacing(spacing);
+        m_rightButtons->setSpacing(spacing);
+
         auto addGroupButtons = [&](KDecoration3::DecorationButtonGroup *group,
                                    const QList<KDecoration3::DecorationButtonType> &types) {
             for (const auto type : types) {
@@ -513,22 +568,51 @@ private:
             state->setBorderRadius(KDecoration3::BorderRadius(radius()));
         });
         // KDecoration treats the frame outside titleBar as resize handles.
-        const qreal resizeTop = maximized ? 0.0 : 5.0;
+        // Top-Docked Tabs sit at y=1, so push top-edge resize outside the frame.
+        const bool topDocked = (m_cfg.buttonShape == int(ButtonShape::TopDockedTabs));
+        const qreal resizeTop = maximized ? 0.0 : (topDocked ? 1.0 : 5.0);
+        setResizeOnlyBorders(maximized ? QMarginsF() : (topDocked ? QMarginsF(0.0, 4.0, 0.0, 0.0) : QMarginsF()));
         setTitleBar(QRectF(side, resizeTop, std::max(0.0, rect().width() - 2.0 * side), top - resizeTop));
         layoutButtons();
     }
 
     void layoutButtons()
     {
+        auto assignGroupRadii = [&](KDecoration3::DecorationButtonGroup *group) {
+            if (!group) {
+                return;
+            }
+            QList<Button *> visibleButtons;
+            for (auto *raw : group->buttons()) {
+                if (raw->isVisible()) {
+                    visibleButtons.append(static_cast<Button *>(raw));
+                }
+            }
+            for (int i = 0; i < visibleButtons.size(); ++i) {
+                auto *btn = visibleButtons[i];
+                if (btn->type() == KDecoration3::DecorationButtonType::Spacer) {
+                    continue;
+                }
+                const bool joinedLeft = (i > 0) && visibleButtons[i - 1]->type() != KDecoration3::DecorationButtonType::Spacer;
+                const bool joinedRight = (i + 1 < visibleButtons.size()) && visibleButtons[i + 1]->type() != KDecoration3::DecorationButtonType::Spacer;
+                btn->setRadii(buttonRadiiForShape(m_cfg.buttonShape, joinedLeft, joinedRight));
+            }
+        };
+        assignGroupRadii(m_leftButtons);
+        assignGroupRadii(m_rightButtons);
+
+        const bool maximized = window() && window()->isMaximized();
         const qreal topH = borderTop() > 0.0 ? borderTop() : qreal(m_cfg.titleHeight);
-        const qreal btnY = std::max(2.0, std::floor((topH - 23.0) * 0.5));
+        const qreal btnY = buttonTopYForShape(m_cfg.buttonShape, topH, maximized);
+        const qreal leftInset = buttonEdgeInsetForShape(m_cfg.buttonShape, radius(), true);
+        const qreal rightInset = buttonEdgeInsetForShape(m_cfg.buttonShape, radius(), false);
 
         if (m_leftButtons) {
-            m_leftButtons->setPos(QPointF(14.0, btnY));
+            m_leftButtons->setPos(QPointF(leftInset, btnY));
         }
         if (m_rightButtons) {
             const qreal rightWidth = m_rightButtons->geometry().width();
-            m_rightButtons->setPos(QPointF(std::max(14.0, rect().right() - rightWidth - 17.0), btnY));
+            m_rightButtons->setPos(QPointF(std::max(leftInset, rect().right() - rightWidth - rightInset), btnY));
         }
 
         QPainterPath outer;
@@ -677,11 +761,11 @@ Button::Button(KDecoration3::DecorationButtonType type, Decoration *decoration, 
     : KDecoration3::DecorationButton(type, decoration, parent ? parent : decoration)
 {
     setAcceptedButtons(Qt::LeftButton);
-    if (type == KDecoration3::DecorationButtonType::Spacer) {
-        setGeometry(QRectF(0.0, 0.0, 10.0, 23.0));
-    } else {
-        setGeometry(QRectF(0.0, 0.0, 27.0, 23.0));
-    }
+    const int shape = decoration ? decoration->config().buttonShape : 0;
+    const QSizeF sz = buttonSizeForShape(shape,
+        type == KDecoration3::DecorationButtonType::Close,
+        type == KDecoration3::DecorationButtonType::Spacer);
+    setGeometry(QRectF(QPointF(0.0, 0.0), sz));
 }
 
 void Button::paint(QPainter *p, const QRectF &repaintArea)
@@ -702,6 +786,16 @@ void Button::paint(QPainter *p, const QRectF &repaintArea)
         ? p->device()->devicePixelRatioF()
         : (deco->window() ? std::max(deco->window()->scale(), 1.0) : 1.0);
 
+    const bool active = deco->window() && deco->window()->isActive();
+    const ButtonColorSpec colorSpec = resolveButtonColor(
+        deco->currentAccentColor(),
+        deco->currentTintStrength(),
+        deco->config().buttonColorMode,
+        buttonColorRoleForType(type()),
+        isHovered(),
+        isPressed(),
+        active);
+
     if (!deco->isUsingShaderMaterial()) {
         const QPointF ptr = isHovered()
             ? (deco->pointerPos().x() >= 0.0 ? deco->pointerPos() : geometry().center())
@@ -710,7 +804,7 @@ void Button::paint(QPainter *p, const QRectF &repaintArea)
         const MaterialKey key{deco->config(), deco->currentAccentColor(),
             geometry().translated(-aligned.topLeft()),
             isHovered() ? ptr - aligned.topLeft() : QPointF(-100, -100),
-            dpr, deco->currentTintStrength(), isHovered(), isPressed()};
+            dpr, deco->currentTintStrength(), m_radii, colorSpec, isHovered(), isPressed()};
         if (m_materialImage.isNull() || m_materialKey != key) {
             m_materialKey = key;
             m_materialImage = QImage(QSize(std::ceil(aligned.width() * dpr), std::ceil(aligned.height() * dpr)), QImage::Format_ARGB32_Premultiplied);
@@ -719,7 +813,7 @@ void Button::paint(QPainter *p, const QRectF &repaintArea)
             QPainter lens(&m_materialImage);
             paintButtonGlass(&lens, key.rect, dpr, key.accent, key.tint,
                 type() == KDecoration3::DecorationButtonType::Close,
-                key.hovered, key.pressed, key.pointer, key.config);
+                key.hovered, key.pressed, key.pointer, key.config, key.radii, &key.colorSpec);
         }
         p->drawImage(aligned.topLeft(), m_materialImage);
     }
@@ -729,9 +823,8 @@ void Button::paint(QPainter *p, const QRectF &repaintArea)
         c.ry() += 1.0;
     }
 
-    const QColor glyphColor = isEnabled()
-        ? (deco->window()->isActive() ? QColor("#effff6") : QColor("#d9e8e0"))
-        : QColor("#7c9184");
+    const bool stealthIdle = (deco->config().buttonShape == int(ButtonShape::StealthLens)) && !isHovered() && !isPressed();
+    const QColor glyphColor = buttonGlyphColor(colorSpec, deco->config(), active, deco->isOpticalTitle(), isEnabled(), stealthIdle);
 
     p->setPen(QPen(glyphColor, 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     p->setBrush(Qt::NoBrush);
@@ -742,9 +835,14 @@ void Button::paint(QPainter *p, const QRectF &repaintArea)
         break;
     case KDecoration3::DecorationButtonType::Maximize:
         if (deco->window()->isMaximized()) {
-            p->drawRect(QRectF(c + QPointF(-2.0, -4.0), QSizeF(6.0, 6.0)));
-            p->fillRect(QRectF(c + QPointF(-4.0, -2.0), QSizeF(6.0, 6.0)), QColor(15, 30, 22, 210));
             p->drawRect(QRectF(c + QPointF(-4.0, -2.0), QSizeF(6.0, 6.0)));
+            QPainterPath back;
+            back.moveTo(c + QPointF(-2.0, -2.0));
+            back.lineTo(c + QPointF(-2.0, -4.0));
+            back.lineTo(c + QPointF(4.0, -4.0));
+            back.lineTo(c + QPointF(4.0, 2.0));
+            back.lineTo(c + QPointF(2.0, 2.0));
+            p->drawPath(back);
         } else {
             p->drawRect(QRectF(c - QPointF(4.0, 3.5), QSizeF(8.0, 7.0)));
         }
@@ -756,8 +854,10 @@ void Button::paint(QPainter *p, const QRectF &repaintArea)
     case KDecoration3::DecorationButtonType::Menu: {
         const QIcon icon = deco->window()->icon();
         if (!icon.isNull()) {
-            const QRectF iconRect(c - QPointF(10.0, 10.0), QSizeF(20.0, 20.0));
-            const QPixmap pixmap = icon.pixmap(QSize(20, 20), dpr);
+            const qreal iconSide = std::min<qreal>(20.0, std::max<qreal>(14.0, geometry().height() - 4.0));
+            const QRectF iconRect(c - QPointF(iconSide * 0.5, iconSide * 0.5), QSizeF(iconSide, iconSide));
+            const int iconPx = qRound(iconSide);
+            const QPixmap pixmap = icon.pixmap(QSize(iconPx, iconPx), dpr);
             p->setRenderHint(QPainter::SmoothPixmapTransform, true);
             p->drawPixmap(iconRect, pixmap, QRectF(pixmap.rect()));
         } else {

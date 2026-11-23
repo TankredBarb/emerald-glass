@@ -18,6 +18,7 @@
 #include <QSlider>
 #include <QTabWidget>
 #include <QTemporaryDir>
+#include <QVector4D>
 #include <iostream>
 using namespace KDecoration3;
 class Client : public DecoratedWindowPrivateV4 {
@@ -416,6 +417,185 @@ int main(int argc,char **argv) {
    const auto color=image.pixelColor(x,y); ++samples; white+=std::min({color.red(),color.green(),color.blue()})>205;
   }
   check(white<samples/50,"native Crystal hover keeps its blue tint without white washout");
+ }
+ {
+  // Button shape configuration, KCM selector, geometry invariants, and StealthLens CPU contrast.
+  EmeraldGlass::MaterialConfig shapeCfg;
+  check(shapeCfg.buttonShape==0,"button shape defaults to Classic Emerald");
+  for(int shape=0; shape<=4; ++shape) {
+   shapeCfg.buttonShape=shape; EmeraldGlass::saveMaterialConfig(shapeCfg);
+   check(EmeraldGlass::loadMaterialConfig().buttonShape==shape,"button shape round-trips");
+  }
+  {
+   KConfigGroup geom(KSharedConfig::openConfig(QStringLiteral("emeraldglassrc")),QStringLiteral("Geometry"));
+   geom.writeEntry("ButtonShape",99); geom.sync();
+   check(EmeraldGlass::loadMaterialConfig().buttonShape==4,"button shape clamps out-of-range high values");
+   geom.writeEntry("ButtonShape",-3); geom.sync();
+   check(EmeraldGlass::loadMaterialConfig().buttonShape==0,"button shape clamps negative values");
+  }
+  auto *buttonShapeCombo=tabs->widget(2)->findChild<QComboBox *>(QStringLiteral("buttonShape"));
+  check(buttonShapeCombo && buttonShapeCombo->count()==5,"button shape selector is on Geometry & Buttons tab with 5 shapes");
+  buttonShapeCombo->setCurrentIndex(buttonShapeCombo->findData(int(EmeraldGlass::ButtonShape::JoinedStrip)));
+  module->save(); settings->reconfigured();
+  check(EmeraldGlass::loadMaterialConfig().buttonShape==int(EmeraldGlass::ButtonShape::JoinedStrip),"KCM saves JoinedStrip button shape");
+  check(d->property("egButtonShape").toInt()==int(EmeraldGlass::ButtonShape::JoinedStrip),"decoration publishes egButtonShape");
+  {
+   const auto btns=d->property("egButtons").toList();
+   const auto radii=d->property("egButtonRadii").toList();
+   check(btns.size()==3 && radii.size()==3,"default JoinedStrip publishes 3 buttons and radii");
+   const QRectF b0=btns[0].toRectF(), b1=btns[1].toRectF(), b2=btns[2].toRectF();
+   check(qFuzzyCompare(b0.width(),26.0) && qFuzzyCompare(b1.width(),26.0) && qFuzzyCompare(b2.width(),35.0),
+         "JoinedStrip widens Close to 35px and keeps others 26px");
+   check(qFuzzyCompare(b0.right(),b1.left()) && qFuzzyCompare(b1.right(),b2.left()),
+         "JoinedStrip has zero gap between adjacent buttons");
+   const QVector4D r0=radii[0].value<QVector4D>(), r1=radii[1].value<QVector4D>(), r2=radii[2].value<QVector4D>();
+   check(qFuzzyCompare(r0.x(),5.0f) && qFuzzyCompare(r0.y(),0.5f) && qFuzzyCompare(r1.x(),0.5f) &&
+         qFuzzyCompare(r2.x(),0.5f) && qFuzzyCompare(r2.y(),5.0f),
+         "JoinedStrip rounds only outer corners and joins inner corners");
+  }
+  shapeCfg=EmeraldGlass::loadMaterialConfig();
+  shapeCfg.cornerRadius=18; shapeCfg.buttonShape=int(EmeraldGlass::ButtonShape::TopDockedTabs);
+  EmeraldGlass::saveMaterialConfig(shapeCfg); settings->reconfigured();
+  {
+   const auto btns=d->property("egButtons").toList();
+   const auto radii=d->property("egButtonRadii").toList();
+   check(btns.size()==3 && radii.size()==3,"TopDockedTabs publishes 3 buttons and radii");
+   const QRectF b0=btns[0].toRectF(), b2=btns[2].toRectF();
+   check(qFuzzyCompare(b0.top(),1.0) && d->rect().right()-b2.right()>=20.0-0.01,
+         "TopDockedTabs docks at y=1 when restored and respects large corner radius inset");
+   const QVector4D r0=radii[0].value<QVector4D>(), r2=radii[2].value<QVector4D>();
+   check(qFuzzyCompare(r0.x(),0.5f) && qFuzzyCompare(r0.w(),5.5f) && qFuzzyCompare(r2.y(),0.5f) && qFuzzyCompare(r2.z(),5.5f),
+         "TopDockedTabs keeps top corners square and rounds bottom outer corners");
+   check(qFuzzyCompare(d->resizeOnlyBorderTop(),4.0),"TopDockedTabs sets 4px outer top resize border");
+   checkSection(QPointF(b2.center().x(),2.0),Qt::TitleBarArea,"top of TopDockedTabs button is inside titleBar, not resize");
+   checkSection(QPointF(d->size().width()/2,0.5),Qt::TopSection,"1px top rim still resizes when TopDockedTabs is active");
+   bridge.client->maximizedHorizontally=bridge.client->maximizedVertically=true;
+   d->window()->maximizedChanged(true);
+   check(qFuzzyCompare(d->property("egButtons").toList()[0].toRectF().top(),0.0),"TopDockedTabs reaches y=0 when maximized");
+   check(qFuzzyCompare(d->resizeOnlyBorderTop(),0.0),"maximized TopDockedTabs clears resizeOnlyBorders");
+   bridge.client->maximizedHorizontally=bridge.client->maximizedVertically=false;
+   d->window()->maximizedChanged(false);
+  }
+  buttonShapeCombo->setCurrentIndex(buttonShapeCombo->findData(int(EmeraldGlass::ButtonShape::LiquidCapsules)));
+  module->save(); settings->reconfigured();
+  {
+   const auto btns=d->property("egButtons").toList();
+   const auto radii=d->property("egButtonRadii").toList();
+   check(btns.size()==3 && qFuzzyCompare(btns[0].toRectF().width(),29.0) && qFuzzyCompare(btns[0].toRectF().height(),22.0),
+         "LiquidCapsules uses 29x22 pill geometry");
+   check(qFuzzyCompare(btns[1].toRectF().left()-btns[0].toRectF().right(),4.0),"LiquidCapsules uses 4px spacing");
+   check(qFuzzyCompare(radii[0].value<QVector4D>().x(),11.0f),"LiquidCapsules uses 11px pill corner radius");
+  }
+  {
+   EmeraldGlass::MaterialConfig stealthCfg;
+   stealthCfg.buttonShape=int(EmeraldGlass::ButtonShape::StealthLens);
+   auto renderCpuBtn=[&](const EmeraldGlass::MaterialConfig &c,bool hov) {
+    QImage img(40,36,QImage::Format_ARGB32_Premultiplied); img.fill(Qt::transparent);
+    QPainter painter(&img);
+    EmeraldGlass::paintButtonGlass(&painter,QRectF(5,5,27,23),1,QColor("#17f559"),0.7f,false,hov,false,QPointF(18,16),c,EmeraldGlass::ButtonRadii{5,5,5,5});
+    painter.end();
+    return img;
+   };
+   const QImage stealthIdle=renderCpuBtn(stealthCfg,false);
+   const QImage stealthHover=renderCpuBtn(stealthCfg,true);
+   EmeraldGlass::MaterialConfig classicCfg; classicCfg.buttonShape=int(EmeraldGlass::ButtonShape::Classic);
+   const QImage classicIdle=renderCpuBtn(classicCfg,false);
+   check(stealthIdle!=classicIdle,"StealthLens idle differs from Classic");
+   check(stealthIdle.pixelColor(18,16).alpha()*2 < stealthHover.pixelColor(18,16).alpha(),
+         "StealthLens idle is visibly more translucent than hover lens");
+  }
+  module->defaults();
+  check(buttonShapeCombo->currentData().toInt()==0,"Restore Defaults resets button shape to Classic Emerald");
+ }
+ {
+  // Button color modes, KCM selector, improved HSV Close accent, and hue avoidance.
+  EmeraldGlass::MaterialConfig colorCfg;
+  check(colorCfg.buttonColorMode==0,"button color mode defaults to Monochrome");
+  for(int mode=0; mode<=4; ++mode) {
+   colorCfg.buttonColorMode=mode; EmeraldGlass::saveMaterialConfig(colorCfg);
+   check(EmeraldGlass::loadMaterialConfig().buttonColorMode==mode,"button color mode round-trips");
+  }
+  {
+   KConfigGroup geom(KSharedConfig::openConfig(QStringLiteral("emeraldglassrc")),QStringLiteral("Geometry"));
+   geom.writeEntry("ButtonColorMode",77); geom.sync();
+   check(EmeraldGlass::loadMaterialConfig().buttonColorMode==4,"button color mode clamps out-of-range high values");
+   geom.writeEntry("ButtonColorMode",-5); geom.sync();
+   check(EmeraldGlass::loadMaterialConfig().buttonColorMode==0,"button color mode clamps negative values");
+  }
+  auto *colorModeCombo=tabs->widget(2)->findChild<QComboBox *>(QStringLiteral("buttonColorMode"));
+  check(colorModeCombo && colorModeCombo->count()==5,"button color selector is on Geometry & Buttons tab with 5 modes");
+  colorModeCombo->setCurrentIndex(colorModeCombo->findData(int(EmeraldGlass::ButtonColorMode::AdaptiveJewelTrio)));
+  module->save(); settings->reconfigured();
+  check(EmeraldGlass::loadMaterialConfig().buttonColorMode==int(EmeraldGlass::ButtonColorMode::AdaptiveJewelTrio),
+        "KCM saves AdaptiveJewelTrio button color mode");
+  const auto colors=d->property("egButtonColors").toList();
+  const auto meta=d->property("egButtonColorMeta").toList();
+  check(colors.size()==3 && meta.size()==3,"decoration publishes egButtonColors and egButtonColorMeta");
+  const QVector4D minCol=colors[0].value<QVector4D>(), maxCol=colors[1].value<QVector4D>(), clsCol=colors[2].value<QVector4D>();
+  check(minCol.w()>1.0f && maxCol.w()>1.0f && clsCol.w()>1.0f,"AdaptiveJewelTrio publishes active fillBoost");
+  check(clsCol.x()>clsCol.y()*2.0f && maxCol.z()>maxCol.x()*1.5f,"AdaptiveJewelTrio keeps Close red and shifts Max away from green");
+
+  auto closeRgb=[](const QColor &c) {
+   return EmeraldGlass::Math::closeButtonAccent({float(c.redF()),float(c.greenF()),float(c.blueF())});
+  };
+  const auto pinkClose=closeRgb(QColor("#ff1493"));
+  check(pinkClose.x>0.8f && pinkClose.y>0.5f && pinkClose.z<0.3f,"Hot Pink close uses warm gold instead of red");
+  const auto orangeClose=closeRgb(QColor("#ff5500"));
+  check(orangeClose.z>0.8f && orangeClose.x<0.3f,"Bright Orange close uses cobalt blue");
+  const auto amethystClose=closeRgb(QColor("#b833ff"));
+  check(amethystClose.x>0.8f && amethystClose.y<0.2f && amethystClose.z<0.2f,"Amethyst close uses ruby red");
+  const auto crystalClose=closeRgb(QColor("#a8e4f5"));
+  check(crystalClose.x>0.8f && crystalClose.y<0.2f && crystalClose.z<0.2f,"Crystal close uses ruby red");
+
+  // AdaptiveJewelTrio hue-avoidance across Emerald, Ruby, Amber, Sapphire, Crystal
+  for(const QColor themeCol : {QColor("#17f559"),QColor("#f7140e"),QColor("#ff9e14"),QColor("#1e8fff"),QColor("#a8e4f5")}) {
+   const auto themeHsv=EmeraldGlass::Math::rgbToHsv({float(themeCol.redF()),float(themeCol.greenF()),float(themeCol.blueF())});
+   for(auto role : {EmeraldGlass::ButtonColorRole::Minimize,EmeraldGlass::ButtonColorRole::Maximize,EmeraldGlass::ButtonColorRole::Close}) {
+    const auto spec=EmeraldGlass::resolveButtonColor(themeCol,0.7f,int(EmeraldGlass::ButtonColorMode::AdaptiveJewelTrio),role,false,false,true);
+    const auto btnHsv=EmeraldGlass::Math::rgbToHsv({float(spec.color.redF()),float(spec.color.greenF()),float(spec.color.blueF())});
+    if(themeHsv.s>0.38f) {
+     const float dh=std::min(std::abs(themeHsv.h-btnHsv.h),360.0f-std::abs(themeHsv.h-btnHsv.h));
+     check(dh>=28.0f,"AdaptiveJewelTrio keeps each button hue distinct from saturated titlebar");
+    }
+   }
+  }
+  // HarmonicHsl complementary Close contrast on arbitrary custom color
+  const QColor tealCustom("#18b8a8");
+  const auto harmClose=EmeraldGlass::resolveButtonColor(tealCustom,0.7f,int(EmeraldGlass::ButtonColorMode::HarmonicHsl),EmeraldGlass::ButtonColorRole::Close,false,false,true);
+  const auto tealHsv=EmeraldGlass::Math::rgbToHsv({float(tealCustom.redF()),float(tealCustom.greenF()),float(tealCustom.blueF())});
+  const auto harmHsv=EmeraldGlass::Math::rgbToHsv({float(harmClose.color.redF()),float(harmClose.color.greenF()),float(harmClose.color.blueF())});
+  const float harmDh=std::min(std::abs(tealHsv.h-harmHsv.h),360.0f-std::abs(tealHsv.h-harmHsv.h));
+  check(harmDh>140.0f,"HarmonicHsl gives Close a strong complementary hue contrast");
+
+  // SmokedChrome neutral idle vs colorful hover
+  const auto smokedIdle=EmeraldGlass::resolveButtonColor(QColor("#17f559"),0.7f,int(EmeraldGlass::ButtonColorMode::SmokedChrome),EmeraldGlass::ButtonColorRole::Minimize,false,false,true);
+  const auto smokedHover=EmeraldGlass::resolveButtonColor(QColor("#17f559"),0.7f,int(EmeraldGlass::ButtonColorMode::SmokedChrome),EmeraldGlass::ButtonColorRole::Minimize,true,false,true);
+  const float idleChroma=std::max({smokedIdle.color.redF(),smokedIdle.color.greenF(),smokedIdle.color.blueF()})-std::min({smokedIdle.color.redF(),smokedIdle.color.greenF(),smokedIdle.color.blueF()});
+  const float hoverChroma=std::max({smokedHover.color.redF(),smokedHover.color.greenF(),smokedHover.color.blueF()})-std::min({smokedHover.color.redF(),smokedHover.color.greenF(),smokedHover.color.blueF()});
+  check(idleChroma<0.25f && hoverChroma>idleChroma*2.5f && smokedIdle.effectiveTint<smokedHover.effectiveTint,
+        "SmokedChrome stays neutral when idle and pops color on hover");
+
+  // Yellow #ffee00 in AdaptiveJewelTrio must produce red Close consistent with closeButtonAccent.
+  const auto yellowClose=EmeraldGlass::resolveButtonColor(QColor("#ffee00"),0.7f,int(EmeraldGlass::ButtonColorMode::AdaptiveJewelTrio),EmeraldGlass::ButtonColorRole::Close,false,false,true);
+  check(yellowClose.color.red()>200 && yellowClose.color.green()<60 && yellowClose.color.blue()<60,
+        "AdaptiveJewelTrio yellow uses red Close matching closeButtonAccent");
+
+  // Button glyph contrast: dark forced title on opaque Emerald keeps light button glyphs,
+  // while low-opacity pale glass uses dark button glyphs.
+  EmeraldGlass::MaterialConfig glyphCfg;
+  glyphCfg.activeTitleText=2; // Dark forced
+  glyphCfg.frameOpacity=0.84f;
+  const auto emeraldSpec=EmeraldGlass::resolveButtonColor(QColor("#17f559"),0.7f,0,EmeraldGlass::ButtonColorRole::Minimize,false,false,true);
+  check(EmeraldGlass::relativeLuminance(EmeraldGlass::buttonGlyphColor(emeraldSpec,glyphCfg,true,true,true,false))>0.5f,
+        "opaque Emerald keeps light button glyphs even with forced dark title");
+  glyphCfg.activePreset=QStringLiteral("custom"); glyphCfg.activeCustomColor=Qt::white;
+  glyphCfg.frameOpacity=0.25f; glyphCfg.tint=0.0f; glyphCfg.activeTitleText=0;
+  const auto whiteSpec=EmeraldGlass::resolveButtonColor(Qt::white,0.0f,0,EmeraldGlass::ButtonColorRole::Minimize,false,false,true);
+  check(EmeraldGlass::relativeLuminance(EmeraldGlass::buttonGlyphColor(whiteSpec,glyphCfg,true,true,true,false))<0.1f,
+        "low-opacity pale glass switches button glyphs to dark ink");
+
+  module->defaults();
+  check(colorModeCombo->currentData().toInt()==0,"Restore Defaults resets button color mode to Monochrome");
  }
  std::cout<<"PASS: blur config, first-page blur slider, frame-only mask, shader/standard blur handoff, unload, disable\n";
 }

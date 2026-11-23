@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 project(EmeraldGlassPreview LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGLWidgets OpenGL)
-qt_add_executable(emerald-glass-preview preview/main.cpp)
+add_executable(emerald-glass-preview preview/main.cpp)
 target_link_libraries(emerald-glass-preview PRIVATE Qt6::Widgets Qt6::OpenGLWidgets Qt6::OpenGL)
 target_compile_definitions(emerald-glass-preview PRIVATE PREVIEW_SHADER_DIR="${CMAKE_CURRENT_SOURCE_DIR}/preview")
 

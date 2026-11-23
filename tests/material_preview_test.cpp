@@ -35,6 +35,21 @@ int main(int argc, char **argv)
     if (preview.grabFramebuffer() == betweenButtons) return 1;
     cfg.useSystemButtons = true;
     preview.setConfig(cfg);
-    if (preview.grabFramebuffer() == betweenButtons) return 1;
+    const auto withSystemButtons = preview.grabFramebuffer();
+    if (withSystemButtons == betweenButtons) return 1;
+    for (int shape : {1, 2, 3, 4}) {
+        cfg.buttonShape = shape;
+        preview.setConfig(cfg);
+        if (preview.grabFramebuffer() == withSystemButtons) return 1;
+    }
+    cfg.buttonShape = 0;
+    cfg.buttonColorMode = 0;
+    preview.setConfig(cfg);
+    const auto monochromePreview = preview.grabFramebuffer();
+    for (int colorMode : {1, 2, 3, 4}) {
+        cfg.buttonColorMode = colorMode;
+        preview.setConfig(cfg);
+        if (preview.grabFramebuffer() == monochromePreview) return 1;
+    }
     std::cout << "PASS: graphics failure preserves native card and CPU KCM fallback\n";
 }

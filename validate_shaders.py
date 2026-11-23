@@ -20,6 +20,8 @@ for path in sorted(source.iterdir()):
     text = path.read_text().replace('#include "sdf.glsl"', include)
     target = output / path.name
     target.write_text(text)
+    (output / ('gles-' + path.name)).write_text(text.replace(
+        '#version 140', '#version 300 es\nprecision highp float;\nprecision highp int;\nprecision highp sampler2D;'))
     records.append({'shader': path.name,
                     'expanded_sha256': hashlib.sha256(text.encode()).hexdigest()})
 
@@ -27,11 +29,12 @@ checks = []
 for vertex, fragment in [('vertex.vert', name) for name in
                          ('downsample.frag', 'upsample.frag', 'noise.frag')] + [
                          ('onscreen_rounded.vert', 'onscreen_rounded.frag')]:
-    command = ['glslangValidator', '-l', str(output / vertex), str(output / fragment)]
-    result = subprocess.run(command, text=True, capture_output=True)
-    checks.append({'vertex': vertex, 'fragment': fragment,
-                   'exit_code': result.returncode,
-                   'output': result.stdout + result.stderr})
+    for prefix in ('', 'gles-'):
+        command = ['glslangValidator', '-l', str(output / (prefix + vertex)), str(output / (prefix + fragment))]
+        result = subprocess.run(command, text=True, capture_output=True)
+        checks.append({'vertex': prefix + vertex, 'fragment': prefix + fragment,
+                       'exit_code': result.returncode,
+                       'output': result.stdout + result.stderr})
 
 report = {'method': 'Offline GLSL compilation and stage linkage, not GPU rendering',
           'shaders': records, 'checks': checks,

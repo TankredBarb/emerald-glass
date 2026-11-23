@@ -52,13 +52,13 @@ Item {
             const selection = findChild(settings, "sensorSelection")
             const cpuId = "cpu/all/usage"
             const missingId = "missing-device/no-such-sensor"
-            const cpuName = 'ЦП "нагрузка", %'
+            const cpuName = 'CPU — "load", %'
             selection.sensorLabelChanged(cpuId, cpuName)
             compare(findChild(monitor, cpuId).textStyle.title, cpuName)
             selection.selected = [missingId, cpuId]
-            selection.sensorLabelChanged(missingId, "Мой датчик")
+            selection.sensorLabelChanged(missingId, "My sensor")
             const missing = findChild(monitor, missingId)
-            compare(missing.textStyle.title, "Мой датчик")
+            compare(missing.textStyle.title, "My sensor")
             verify(!missing.legacyRange, "A custom title must not enable the legacy 0–100 range")
             compare(missing.textStyle.valueText, "—")
             const saved = sensorConfig.roundTripSettings(selection.selected, 2, settings.cfg_sensorLabels)
@@ -66,7 +66,7 @@ Item {
             settings.cfg_sensorLabels = saved.labels
             selection.selected = [cpuId, missingId]
             compare(findChild(monitor, cpuId).textStyle.title, cpuName)
-            compare(findChild(monitor, missingId).textStyle.title, "Мой датчик")
+            compare(findChild(monitor, missingId).textStyle.title, "My sensor")
             selection.selected = [missingId]
             selection.selected = [missingId, cpuId]
             compare(findChild(monitor, cpuId).textStyle.title, cpuName)
@@ -80,9 +80,9 @@ Item {
             for (const serialized of ["", "{broken", "null", "[]", '"CPU"', "7", '{"cpu/all/usage":42}']) {
                 settings.cfg_sensorLabels = serialized
                 compare(findChild(monitor, "cpu/all/usage").textStyle.title, "CPU")
-                selection.sensorLabelChanged("cpu/all/usage", "Мой ЦП")
-                compare(findChild(monitor, "cpu/all/usage").textStyle.title, "Мой ЦП")
-                compare(JSON.parse(settings.cfg_sensorLabels)["cpu/all/usage"], "Мой ЦП")
+                selection.sensorLabelChanged("cpu/all/usage", "My CPU")
+                compare(findChild(monitor, "cpu/all/usage").textStyle.title, "My CPU")
+                compare(JSON.parse(settings.cfg_sensorLabels)["cpu/all/usage"], "My CPU")
             }
         }
         function findEditorControl(item, editing) {
@@ -102,10 +102,10 @@ Item {
             mouseClick(findEditorControl(selection, false))
             tryVerify(() => findEditorControl(selection, true) !== null)
             const editor = findEditorControl(selection, true)
-            editor.text = "Мой процессор"
+            editor.text = "My processor"
             keyClick(Qt.Key_Return)
-            compare(JSON.parse(settings.cfg_sensorLabels)["cpu/all/usage"], "Мой процессор")
-            compare(findChild(monitor, "cpu/all/usage").textStyle.title, "Мой процессор")
+            compare(JSON.parse(settings.cfg_sensorLabels)["cpu/all/usage"], "My processor")
+            compare(findChild(monitor, "cpu/all/usage").textStyle.title, "My processor")
         }
         function test_add_remove_reorder_and_empty_selection() {
             const selection = findChild(settings, "sensorSelection")

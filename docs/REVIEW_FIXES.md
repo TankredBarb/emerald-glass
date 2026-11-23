@@ -1,150 +1,151 @@
-# Исправления ревью и исследование ресайза — 2026-10-20
+# Review fixes and resize investigation — 2026-10-20
 
-Исходные замечания сохранены в [CODE_REVIEW.md](CODE_REVIEW.md). Этот документ
-описывает последующие изменения и пределы их проверки.
+The original findings are preserved in [CODE_REVIEW.md](CODE_REVIEW.md). This
+document describes subsequent changes and the limits of their verification.
 
-## Живая приёмка
+## Live acceptance
 
-2026-10-20 пользователь подтвердил после установки: баг с переключением
-декорации исчез, ресайз визуально плавный. Это проверка текущей desktop-сессии,
-а не всех GPU, версий KWin или настроек общей прозрачности окна.
+On 2026-10-20, after installation, the user confirmed that the decoration-switch
+bug was gone and resizing looked smooth. This verifies the current desktop
+session, not all GPUs, KWin versions or overall window-opacity settings.
 
-## Исправления
+## Fixes
 
-| Замечание | Изменение | Проверка |
+| Finding | Change | Verification |
 | --- | --- | --- |
-| LG превращает пропуски кэша в непрозрачный тёмный цвет | Разделены straight RGB, покрытие кэша и непрозрачная доля материала; спектральные пробы сохраняют alpha | Production GLSL: композиция частичного/пустого кэша при opacity 0/20/80/100%, включая кнопки; opacity 100% исключает фон |
-| Чужие настройки BlurPlus влияют на наши рамки | Собственная группа `Effect-emeraldglass`; whitelist/blacklist исключён из пути наших бордеров | Production config reader с чужим whitelist и BlurFinetune |
-| Общая opacity окна не учитывается | Модуляция учитывает `w->opacity() * data.opacity()` по штатной реализации KWin | Сборка на KWin 6.7.5; desktop-проверка прозрачности отдельно |
-| CPU-кнопки используют Active tint для inactive | Renderer получает текущую tint strength окна | Настоящий decoration plugin: независимость inactive от Active tint; hover cache invalidation |
-| Частичная ошибка GL выдаёт ложную готовность | Отдельный флаг успешной инициализации; карточка сохраняет native fallback, KCM — CPU preview | Повторные вызовы после ошибки; CPU fallback в headless Qt |
-| Пустые подписи нулевых слайдеров | Начальное значение label устанавливается сразу | Настоящий KCM: сохранённый Blur=0 показывает `0 / 15` |
-| Неточный предпросмотр геометрии | KCM учитывает левую/правую системную раскладку, spacers и семантическую кнопку Close; полное центрирование отличается от центрирования между группами | CPU preview сравнивается при смене раскладки/выравнивания |
+| LG turns missing cache coverage into opaque dark color | Separated straight RGB, cache coverage and opaque material contribution; spectral samples retain alpha | Production GLSL: partial/empty-cache compositing at opacity 0/20/80/100%, including buttons; opacity 100% excludes the backdrop |
+| Foreign BlurPlus settings affect our frames | Dedicated `Effect-emeraldglass` group; whitelist/blacklist excluded from our border path | Production config reader with a foreign whitelist and BlurFinetune |
+| Overall window opacity is ignored | Modulation accounts for `w->opacity() * data.opacity()`, following standard KWin | Build on KWin 6.7.5; desktop opacity verification remains separate |
+| CPU buttons use Active tint for inactive windows | Renderer receives the window's current tint strength | Actual decoration plugin: inactive appearance independent of Active tint; hover cache invalidation |
+| Partial GL failure reports false readiness | Separate successful-initialization flag; card retains native fallback, KCM retains CPU preview | Repeated calls after failure; CPU fallback in headless Qt |
+| Empty labels for zero-valued sliders | Numeric label initialized immediately | Actual KCM: saved Blur=0 displays `0 / 15` |
+| Inaccurate geometry preview | KCM respects left/right system layouts, spacers and the semantic Close button; full centering differs from centering between button groups | CPU preview compared across layout/alignment changes |
 
-Для нормального непрозрачного backdrop формулы цвета, освещения и оптики LG
-сохранены. Изменения alpha касаются неполного покрытия кэша. Дополнительный
-сырой sampler не вводился.
+For a normal opaque backdrop, the LG color, lighting and optics formulas are
+preserved. Alpha changes concern incomplete cache coverage. No additional raw
+sampler was introduced.
 
-## Смена Layan → Emerald Glass
+## Switching Layan → Emerald Glass
 
-Внесены изменения в жизненный цикл, соответствующие обнаруженным рискам:
+Lifecycle changes address the identified risks:
 
-- при смене декорации отключаются соединения и event filter предыдущего объекта;
-- область перечитывается после commit, а также при изменении client geometry,
-  даже если внешняя геометрия осталась прежней;
-- при переходе на нашу рамку и первом создании её backdrop-кэша запрашивается
-  полный repaint сцены;
-- такой полный repaint не повторяется на каждом размере при ресайзе;
-- копирование framebuffer остаётся ограничено реальным dirty region.
+- Disconnect the previous decoration's connections and event filter on a switch.
+- Reread the region after commit and on client-geometry changes, even when the
+  external geometry remains unchanged.
+- Request a full scene repaint when switching to our frame and first creating
+  its backdrop cache.
+- Do not repeat that full repaint for every size during resizing.
+- Keep framebuffer copying restricted to the actual dirty region.
 
-В D-Bus debug добавлены `regionChanges`, `cacheInitializations` и подробности
-геометрии для параметра `frames`:
+D-Bus debugging now includes `regionChanges`, `cacheInitializations` and detailed
+geometry for the `frames` parameter:
 
 ```sh
 qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.debug emeraldglass frames
 ```
 
-Сборка подтверждена. После установки пользователь проверил переключение
-декорации и подтвердил, что баг исчез. Эта живая приёмка дополняет автотесты;
-универсальная проверка всех compositor/GPU-конфигураций не проводилась.
+The build passed. After installation, the user tested decoration switching and
+confirmed that the bug was gone. This live acceptance supplements automated
+tests; no universal check of all compositor/GPU configurations was performed.
 
-## Почему ресайз стоил дорого
+## Why resizing was expensive
 
-CPU-путь заново вычислял SDF, градиенты, степени и экспоненты по всей рамке
-при каждом размере. Изображение кэша при этом имело размеры всего окна,
-включая прозрачную клиентскую область. Этот путь используется при выключенном
-LG/эффекте и для нативного материала при деформации окна.
+The CPU path recomputed SDF, gradients, powers and exponentials across the entire
+frame for every size. Its cache image covered the whole window, including the
+transparent client area. This path is used with LG/the effect disabled and for
+native material during window transformations.
 
-Теперь сохраняется компактный образец углов и краёв. Неизменные прямые участки
-растягиваются; клиентская область не рисуется. При дробном DPR сохраняется
-фаза правого/нижнего края относительно физических пикселей. Маленькие окна,
-для которых растягивание неприменимо, используют полный SDF. Кнопки также
-сохраняют готовую линзу до изменения материала, состояния, масштаба или
-позиции указателя; нерелевантные repaint-участки пропускаются.
+A compact sample of corners and edges is now cached. Unchanged straight sections
+are stretched; the client area is not painted. At fractional DPR, the phase of
+the right/bottom edge relative to physical pixels is preserved. Small windows
+that cannot use stretching fall back to the full SDF. Buttons also retain their
+rendered lens until material, state, scale or pointer position changes;
+unrelated repaint regions are skipped.
 
-GPU-путь больше не выделяет лишние уровни текстур и не расширяет damage по
-неиспользуемым client/dock-настройкам. Полная переработка стратегии GPU-аллокаций
-не выполнялась: размеры backdrop-текстур по-прежнему меняются вместе с окном.
+The GPU path no longer allocates unused texture levels or expands damage based
+on unused client/dock settings. The GPU allocation strategy was not fully
+redesigned: backdrop texture sizes still change with the window.
 
-## Измерения
+## Measurements
 
-`decoration-resize-probe` загружает настоящий KDecoration3 plugin с тестовым
-DecoratedWindow, меняет размер клиента и рисует четыре полосы, как renderer
-декорации KWin. В сценарии шесть кнопок, исходный клиент 1280×720, четыре
-прогревочных и 40 измеряемых кадров. Настройки изолированы от пользовательских.
-Таймер включает изменение геометрии, создание полос и CPU paint.
+`decoration-resize-probe` loads the actual KDecoration3 plugin with a test
+DecoratedWindow, changes the client size and paints four strips like KWin's
+decoration renderer. The scenario uses six buttons, an initial 1280×720 client,
+four warm-up frames and 40 measured frames. Configuration is isolated from user
+settings. The timer includes geometry changes, strip creation and CPU painting.
 
-| Декорация/путь | DPR 1: p50 / p95, мс | DPR 2: p50 / p95, мс |
+| Decoration/path | DPR 1: p50 / p95, ms | DPR 2: p50 / p95, ms |
 | --- | --- | --- |
-| Emerald до исправления, CPU | 10,89 / 11,88 | 42,82 / 46,61 |
-| Emerald после исправления, CPU | 0,42 / 0,44 | 0,62 / 0,64 |
-| Emerald после исправления, transformed | 0,42 / 0,44 | 0,61 / 0,63 |
-| Emerald, GPU material: только native CPU часть | 0,37 / 0,39 | 0,41 / 0,42 |
-| Klassy, тот же тестовый клиент | 0,21 / 0,22 | 0,30 / 0,31 |
+| Emerald before the fix, CPU | 10.89 / 11.88 | 42.82 / 46.61 |
+| Emerald after the fix, CPU | 0.42 / 0.44 | 0.62 / 0.64 |
+| Emerald after the fix, transformed | 0.42 / 0.44 | 0.61 / 0.63 |
+| Emerald, GPU material: native CPU portion only | 0.37 / 0.39 | 0.41 / 0.42 |
+| Klassy, same test client | 0.21 / 0.22 | 0.30 / 0.31 |
 
-Это измерения CPU-декорации, а не desktop FPS. Они не включают реальный GPU
-blur, загрузку буферов в compositor, синхронизацию клиента, VRR, очередь
-представления и perceptual-плавность. Тем не менее исходный CPU-путь сам
-превышал бюджет кадра 144 Гц даже при DPR 1 и является подтверждённым источником
-нагрузки.
+These measure CPU decoration cost, not desktop FPS. They exclude actual GPU
+blur, buffer uploads to the compositor, client synchronization, VRR,
+presentation queuing and perceived smoothness. Nevertheless, the original CPU
+path alone exceeded the 144 Hz frame budget even at DPR 1 and is a confirmed
+source of load.
 
-Воспроизведение после сборки:
+To reproduce after building:
 
 ```sh
 cmake --build build/blur-control --target decoration-resize-probe
 QT_QPA_PLATFORM=offscreen DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent \
   build/blur-control/native/decoration-resize-probe \
   "$PWD/build/blur-control/native/org.tankred.emeraldglass.so" cpu
-# Другие режимы: transformed, gpu.
-# Для сравнения передать абсолютный путь к установленному plugin Klassy.
+# Other modes: transformed, gpu.
+# For comparison, pass the absolute path to the installed Klassy plugin.
 ```
 
-Сравнение с полной SDF-отрисовкой проверяется автоматически для нескольких
-геометрий и DPR 1/1.25/1.5/2, вне caption/button glyphs. Допустимое расхождение
-каналов premultiplied RGBA — не более 2/255.
+Comparison with full SDF rendering is tested automatically for several
+geometries and DPR 1/1.25/1.5/2, excluding caption/button glyphs. The permitted
+premultiplied RGBA channel difference is at most 2/255.
 
-## Проверки и последующая приёмка
+## Checks and subsequent acceptance
 
-Обе сборки и offline GLSL проходят. CTest: 6/6, включая новые проверки
-изоляции настроек и отказа graphics preview. Новые регрессии отдельно
-воспроизвели ошибки на предыдущем шейдере и предыдущем установленном native
-plugin до проверки исправленной версии.
+Both builds and offline GLSL checks pass. CTest: 6/6, including new settings
+isolation and graphics-preview failure checks. The new regressions separately
+reproduced the defects in the previous shader and previously installed native
+plugin before verifying the fixed version.
 
-После установки нужен повторный вход, чтобы KWin загрузил новую нативную
-декорацию. Для живого сравнения ресайза использовать одно приложение и
-одинаковые размеры с Klassy и Emerald, проверить отдельно LG on/off и
-деформацию, включая дробный масштаб. Сценарий смены темы проверяется без
-предварительного движения окна. Hardware GPU frame time остаётся отдельным
-этапом измерения, если после устранения CPU-проблемы разница сохраняется.
+After installation, log out and back in so KWin loads the new native decoration.
+For a live resize comparison, use one application and identical sizes with
+Klassy and Emerald; check LG on/off and transformations separately, including
+fractional scaling. Test the decoration-switch scenario without moving the
+window first. Hardware GPU frame time remains a separate measurement stage if
+a difference persists after the CPU issue is removed.
 
-## Засветка Crystal и hover Close
+## Crystal clipping and Close hover
 
-На текущих настройках пользователя (Crystal, opacity 32%, tint 102%, specular
-58%, glow 88%, refraction 45%, dispersion 60%) несколько белых бликов и hover
-складывались в пересвет. Для светлых пастельных материалов ослаблены белая
-составляющая контура, верхняя засветка и hover; Close получает такое же
-ограничение во всех пресетах, сохраняя контрастный сигнальный цвет.
-Изменены только CPU/GPU-материалы кнопок, геометрия и материал рамки сохранены.
+With the user's current settings (Crystal, opacity 32%, tint 102%, specular
+58%, glow 88%, refraction 45%, dispersion 60%), several white highlights and
+hover contributions combined into overexposure. For light pastel materials,
+the white rim contribution, top highlight and hover were reduced. Close uses
+the same limit across all presets while retaining a contrasting signal color.
+Only CPU/GPU button materials changed; geometry and frame material are preserved.
 
-Для золотого Amber Close при hover/press получает холодный синий акцент:
-красный терялся на тёплом материале. CPU и GLSL используют одинаковое правило
-для золотых оттенков; красные/розовые сохраняют золотой сигнал, остальные — красный.
+For golden Amber, Close receives a cool blue accent on hover/press: red blended
+into the warm material. CPU and GLSL use the same rule for golden hues;
+red/pink hues retain a gold signal, and other hues retain red.
 
-После сравнения в `--close-comparison` выбран вариант 3: цветная глубина.
-В основной GLSL и CPU fallback заливка ослаблена с 75% до 35% и плавно
-нарастает от края вглубь линзы. Ободок и отражения используют 80% цвета темы
-и 20% сигнального цвета; блики восстановлены до уровня выбранной пробы.
-Режим сравнения сохраняет прежний материал в строке 0, выбранный — в строке 3.
+After comparison with `--close-comparison`, variant 3 was selected: colored
+depth. In the main GLSL and CPU fallback, fill was reduced from 75% to 35% and
+increases smoothly from the edge into the lens. The rim and reflections use
+80% theme color and 20% signal color; highlights were restored to the selected
+sample's level. Comparison mode retains the previous material in row 0 and the
+selected material in row 3.
 
-В GLSL цвет кнопки теперь ограничивается до premultiplication по покрытию.
-Это не позволяет яркому красному сигналу пересилить сглаживание скруглённого
-края. На контролируемом teal-backdrop доля red >= 254 внутри проверяемого тела
-Close снизилась с 22–30% до нуля для всех восьми пресетов; белые пиксели
-(минимальный RGB-канал > 205) в Crystal hover — с 32 до нуля.
+In GLSL, button color is now clamped before coverage premultiplication. This
+prevents a bright red signal from overpowering rounded-edge antialiasing.
+Against a controlled teal backdrop, the share of pixels with red >= 254 inside
+the checked Close body fell from 22–30% to zero across all eight presets; white
+pixels (minimum RGB channel > 205) in Crystal hover fell from 32 to zero.
 
-Регрессия воспроизводит прежний пересвет на сохранённом старом шейдере и
-проходит после исправления. Проверены hover/press всех пресетов при масштабе
-1/1.25/1.5/2, границы линзы, premultiplied alpha и CPU fallback Crystal.
-Сборки, 6/6 CTest и GLSL validation проходят. Сравнительные изображения —
-рендеры материала через EGL/llvmpipe, а не снимки живого KWin; окончательная
-визуальная приёмка остаётся после установки и повторного входа.
+The regression reproduces the previous clipping with the saved old shader and
+passes after the fix. Hover/press were checked across all presets at scale
+1/1.25/1.5/2, along with lens boundaries, premultiplied alpha and Crystal CPU
+fallback. Builds, 6/6 CTest and GLSL validation pass. Comparison images are
+material renders through EGL/llvmpipe, not live KWin screenshots; final visual
+acceptance remains after installation and logging back in.

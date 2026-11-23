@@ -9,6 +9,7 @@
 #include <QPainterPath>
 #include <QPointF>
 #include <QRectF>
+#include <QSizeF>
 #include <QString>
 #include <algorithm>
 #include <cmath>
@@ -51,6 +52,93 @@ inline QColor resolvePresetColor(const QString &preset, const QColor &customColo
     return fallback;
 }
 
+enum class ButtonShape : int {
+    Classic = 0,
+    JoinedStrip = 1,
+    TopDockedTabs = 2,
+    LiquidCapsules = 3,
+    StealthLens = 4,
+};
+
+struct ButtonRadii {
+    float tl = 3.0f;
+    float tr = 3.0f;
+    float br = 3.0f;
+    float bl = 3.0f;
+    bool operator==(const ButtonRadii &) const = default;
+};
+
+inline QSizeF buttonSizeForShape(int shape, bool isClose, bool isSpacer)
+{
+    const qreal height = (shape == int(ButtonShape::LiquidCapsules)) ? 22.0 : 23.0;
+    if (isSpacer) {
+        return QSizeF(10.0, height);
+    }
+    if (shape == int(ButtonShape::JoinedStrip) || shape == int(ButtonShape::TopDockedTabs)) {
+        return QSizeF(isClose ? 35.0 : 26.0, 23.0);
+    }
+    if (shape == int(ButtonShape::LiquidCapsules)) {
+        return QSizeF(29.0, 22.0);
+    }
+    return QSizeF(27.0, 23.0);
+}
+
+inline qreal buttonSpacingForShape(int shape)
+{
+    if (shape == int(ButtonShape::JoinedStrip) || shape == int(ButtonShape::TopDockedTabs)) {
+        return 0.0;
+    }
+    if (shape == int(ButtonShape::LiquidCapsules)) {
+        return 4.0;
+    }
+    return 3.0;
+}
+
+inline qreal buttonTopYForShape(int shape, qreal titleHeight, bool maximized)
+{
+    if (shape == int(ButtonShape::TopDockedTabs)) {
+        return maximized ? 0.0 : 1.0;
+    }
+    const qreal btnH = (shape == int(ButtonShape::LiquidCapsules)) ? 22.0 : 23.0;
+    return std::max(2.0, std::floor((titleHeight - btnH) * 0.5));
+}
+
+inline qreal buttonEdgeInsetForShape(int shape, qreal cornerRadius, bool isLeft)
+{
+    const qreal base = isLeft ? 14.0 : 17.0;
+    if (shape == int(ButtonShape::TopDockedTabs)) {
+        return std::max(base, cornerRadius + 2.0);
+    }
+    return base;
+}
+
+inline ButtonRadii buttonRadiiForShape(int shape, bool joinedLeft, bool joinedRight)
+{
+    if (shape == int(ButtonShape::JoinedStrip)) {
+        return ButtonRadii{
+            joinedLeft ? 0.5f : 5.0f,
+            joinedRight ? 0.5f : 5.0f,
+            joinedRight ? 0.5f : 5.0f,
+            joinedLeft ? 0.5f : 5.0f,
+        };
+    }
+    if (shape == int(ButtonShape::TopDockedTabs)) {
+        return ButtonRadii{
+            0.5f,
+            0.5f,
+            joinedRight ? 0.5f : 5.5f,
+            joinedLeft ? 0.5f : 5.5f,
+        };
+    }
+    if (shape == int(ButtonShape::LiquidCapsules)) {
+        return ButtonRadii{11.0f, 11.0f, 11.0f, 11.0f};
+    }
+    if (shape == int(ButtonShape::StealthLens)) {
+        return ButtonRadii{5.0f, 5.0f, 5.0f, 5.0f};
+    }
+    return ButtonRadii{3.0f, 3.0f, 3.0f, 3.0f};
+}
+
 struct MaterialConfig {
     QString activePreset = QStringLiteral("emerald");
     QString inactivePreset = QStringLiteral("ruby");
@@ -75,6 +163,8 @@ struct MaterialConfig {
     int titleHeight = 39;
     int borderWidth = 8;
     int titleAlignment = 0; // 0 = Left, 1 = Center, 2 = CenterFullWidth
+    int buttonShape = 0; // 0 = Classic, 1 = JoinedStrip, 2 = TopDockedTabs, 3 = LiquidCapsules, 4 = StealthLens
+    int buttonColorMode = 0; // 0 = Monochrome, 1 = AlwaysTintedClose, 2 = AdaptiveJewelTrio, 3 = HarmonicHsl, 4 = SmokedChrome
     bool useSystemButtons = false;
     bool shaderEffectEnabled = true;
 
@@ -128,6 +218,8 @@ inline MaterialConfig loadMaterialConfig()
     cfg.titleHeight = std::clamp(geom.readEntry("TitleHeight", 39), 26, 56);
     cfg.borderWidth = std::clamp(geom.readEntry("BorderWidth", 8), 0, 20);
     cfg.titleAlignment = std::clamp(geom.readEntry("TitleAlignment", 0), 0, 2);
+    cfg.buttonShape = std::clamp(geom.readEntry("ButtonShape", 0), 0, 4);
+    cfg.buttonColorMode = std::clamp(geom.readEntry("ButtonColorMode", 0), 0, 4);
     cfg.useSystemButtons = geom.readEntry("UseSystemButtons", false);
 
     return cfg;
@@ -161,6 +253,8 @@ inline void saveMaterialConfig(const MaterialConfig &cfg)
     geom.writeEntry("TitleHeight", cfg.titleHeight);
     geom.writeEntry("BorderWidth", cfg.borderWidth);
     geom.writeEntry("TitleAlignment", cfg.titleAlignment);
+    geom.writeEntry("ButtonShape", std::clamp(cfg.buttonShape, 0, 4));
+    geom.writeEntry("ButtonColorMode", std::clamp(cfg.buttonColorMode, 0, 4));
     geom.writeEntry("UseSystemButtons", cfg.useSystemButtons);
     config->sync();
 }
@@ -216,17 +310,77 @@ inline Vec3 boostTint(Vec3 color, Vec3 accent, float strength)
     return mix3(color, target, amount);
 }
 
-// Close feedback contrasts with red/pink and gold materials.
+struct Hsv {
+    float h = 0.0f; // 0..360
+    float s = 0.0f; // 0..1
+    float v = 0.0f; // 0..1
+};
+
+inline Hsv rgbToHsv(Vec3 c)
+{
+    const float maxC = std::max({c.x, c.y, c.z});
+    const float minC = std::min({c.x, c.y, c.z});
+    const float d = maxC - minC;
+    float h = 0.0f;
+    if (d > 0.0001f) {
+        if (maxC == c.x) {
+            h = std::fmod((c.y - c.z) / d, 6.0f);
+        } else if (maxC == c.y) {
+            h = (c.z - c.x) / d + 2.0f;
+        } else {
+            h = (c.x - c.y) / d + 4.0f;
+        }
+        h *= 60.0f;
+        if (h < 0.0f) {
+            h += 360.0f;
+        }
+    }
+    const float s = maxC > 0.0001f ? d / maxC : 0.0f;
+    return {h, s, maxC};
+}
+
+inline Vec3 hsvToRgb(float hueDeg, float sat, float val)
+{
+    float h = std::fmod(hueDeg, 360.0f);
+    if (h < 0.0f) {
+        h += 360.0f;
+    }
+    const float s = clampf(sat, 0.0f, 1.0f);
+    const float v = clampf(val, 0.0f, 1.0f);
+    const float c = v * s;
+    const float x = c * (1.0f - std::abs(std::fmod(h / 60.0f, 2.0f) - 1.0f));
+    const float m = v - c;
+    Vec3 rgb;
+    if (h < 60.0f) {
+        rgb = {c, x, 0.0f};
+    } else if (h < 120.0f) {
+        rgb = {x, c, 0.0f};
+    } else if (h < 180.0f) {
+        rgb = {0.0f, c, x};
+    } else if (h < 240.0f) {
+        rgb = {0.0f, x, c};
+    } else if (h < 300.0f) {
+        rgb = {x, 0.0f, c};
+    } else {
+        rgb = {c, 0.0f, x};
+    }
+    return {rgb.x + m, rgb.y + m, rgb.z + m};
+}
+
+// Close feedback adapts by HSV hue so red/pink/rose and orange/amber/gold materials stay distinct.
 inline Vec3 closeButtonAccent(Vec3 base)
 {
-    const float peak = std::max({base.x, base.y, base.z});
-    const float chroma = peak - std::min({base.x, base.y, base.z});
-    const bool redFamily = base.x == peak && chroma > peak * 0.1f
-        && std::abs(base.y - base.z) <= chroma * 0.5f;
-    const bool goldFamily = base.x == peak && base.y > peak * 0.45f
-        && base.y < peak * 0.85f && base.z < peak * 0.25f;
-    if (goldFamily) return {0.06f, 0.36f, 1.0f};
-    return redFamily ? Vec3{1.0f, 0.70f, 0.12f} : Vec3{0.92f, 0.08f, 0.04f};
+    const Hsv hsv = rgbToHsv(base);
+    if (hsv.s <= 0.15f) {
+        return {0.92f, 0.08f, 0.06f};
+    }
+    if (hsv.h >= 305.0f || hsv.h < 18.0f) {
+        return {1.0f, 0.70f, 0.12f};
+    }
+    if (hsv.h >= 18.0f && hsv.h < 52.0f) {
+        return {0.08f, 0.40f, 1.0f};
+    }
+    return {0.92f, 0.08f, 0.06f};
 }
 
 inline float boxDistance(float px, float py, float bx, float by, float bw, float bh, float radius)
@@ -236,6 +390,21 @@ inline float boxDistance(float px, float py, float bx, float by, float bw, float
     const float mx = std::max(qx, 0.0f);
     const float my = std::max(qy, 0.0f);
     return std::min(std::max(qx, qy), 0.0f) + std::sqrt(mx * mx + my * my) - radius;
+}
+
+inline float roundedBoxDistance(float px, float py, float bx, float by, float bw, float bh, const ButtonRadii &radii)
+{
+    const float hx = bw * 0.5f;
+    const float hy = bh * 0.5f;
+    const float rx = px - (bx + hx);
+    const float ry = py - (by + hy);
+    float r = ry > 0.0f ? (rx > 0.0f ? radii.br : radii.bl) : (rx > 0.0f ? radii.tr : radii.tl);
+    r = std::min(r, std::min(hx, hy));
+    const float qx = std::abs(rx) - hx + r;
+    const float qy = std::abs(ry) - hy + r;
+    const float mx = std::max(qx, 0.0f);
+    const float my = std::max(qy, 0.0f);
+    return std::min(std::max(qx, qy), 0.0f) + std::sqrt(mx * mx + my * my) - r;
 }
 
 inline float frameDistance(float px, float py, const QRectF &frame, const QRectF &content, float outerRadius)
@@ -310,6 +479,227 @@ inline QColor MaterialConfig::titleColorForWindow(bool active, bool opticalMater
 inline QColor titleShadowColor(const QColor &text)
 {
     return relativeLuminance(text) < 0.5f ? QColor(255, 255, 255, 160) : QColor(0, 0, 0, 205);
+}
+
+enum class ButtonColorMode : int {
+    Monochrome = 0,
+    AlwaysTintedClose = 1,
+    AdaptiveJewelTrio = 2,
+    HarmonicHsl = 3,
+    SmokedChrome = 4,
+};
+
+enum class ButtonColorRole : int {
+    Other = 0,
+    Minimize = 1,
+    Maximize = 2,
+    Close = 3,
+};
+
+struct ButtonColorSpec {
+    QColor color;
+    float fillBoost = 0.0f;
+    float effectiveTint = 0.70f;
+    float rimBlend = 0.0f;
+    float restrainedLight = 0.0f;
+    bool operator==(const ButtonColorSpec &) const = default;
+};
+
+inline ButtonColorSpec resolveButtonColor(const QColor &windowAccent,
+                                          float windowTint,
+                                          int colorMode,
+                                          ButtonColorRole role,
+                                          bool hovered,
+                                          bool pressed,
+                                          bool active)
+{
+    const Math::Vec3 baseAccent{float(windowAccent.redF()), float(windowAccent.greenF()), float(windowAccent.blueF())};
+    const float paleBase = Math::smoothstep(0.40f, 0.70f, std::min({baseAccent.x, baseAccent.y, baseAccent.z}));
+    const bool isClose = (role == ButtonColorRole::Close);
+    const bool interactive = hovered || pressed;
+    const float inactiveFillScale = active ? 1.0f : 0.72f;
+    auto toQColor = [](const Math::Vec3 &v) {
+        return QColor::fromRgbF(
+            Math::clampf(v.x, 0.0f, 1.0f),
+            Math::clampf(v.y, 0.0f, 1.0f),
+            Math::clampf(v.z, 0.0f, 1.0f));
+    };
+
+    if (colorMode == int(ButtonColorMode::AlwaysTintedClose)) {
+        if (isClose) {
+            const Math::Vec3 c = Math::closeButtonAccent(baseAccent);
+            return ButtonColorSpec{
+                toQColor(c),
+                interactive ? 0.44f : 0.24f * inactiveFillScale,
+                interactive ? 1.0f : 0.90f,
+                interactive ? 0.45f : 0.30f,
+                interactive ? 0.28f : 0.32f,
+            };
+        }
+        return ButtonColorSpec{windowAccent, 0.0f, windowTint, 0.0f, paleBase};
+    }
+
+    if (colorMode == int(ButtonColorMode::AdaptiveJewelTrio)) {
+        if (role == ButtonColorRole::Other) {
+            return ButtonColorSpec{windowAccent, 0.0f, windowTint, 0.0f, paleBase};
+        }
+        const Math::Hsv hsv = Math::rgbToHsv(baseAccent);
+        float minH = 38.0f;
+        float maxH = 140.0f;
+        float clsH = 356.0f;
+        if (hsv.s > 0.22f) {
+            if (hsv.h >= 305.0f || hsv.h < 18.0f) {
+                minH = 204.0f;
+                maxH = 140.0f;
+                clsH = 44.0f;
+            } else if (hsv.h >= 18.0f && hsv.h < 52.0f) {
+                minH = 185.0f;
+                maxH = 135.0f;
+                clsH = 222.0f;
+            } else if (hsv.h >= 52.0f && hsv.h < 68.0f) {
+                minH = 190.0f;
+                maxH = 138.0f;
+                clsH = 356.0f;
+            } else if (hsv.h >= 68.0f && hsv.h < 168.0f) {
+                minH = 38.0f;
+                maxH = 205.0f;
+                clsH = 356.0f;
+            }
+        }
+        const float hue = role == ButtonColorRole::Minimize ? minH
+            : (role == ButtonColorRole::Maximize ? maxH : clsH);
+        const bool paleTheme = (hsv.s < 0.38f && hsv.v > 0.75f);
+        const float sat = paleTheme ? 0.80f : 0.88f;
+        const float val = paleTheme ? 0.84f : 0.95f;
+        return ButtonColorSpec{
+            toQColor(Math::hsvToRgb(hue, sat, val)),
+            interactive ? 0.44f : 0.28f * inactiveFillScale,
+            interactive ? 1.0f : 0.95f,
+            interactive ? 0.65f : 0.55f,
+            interactive ? 0.24f : 0.28f,
+        };
+    }
+
+    if (colorMode == int(ButtonColorMode::HarmonicHsl)) {
+        if (role == ButtonColorRole::Other) {
+            return ButtonColorSpec{windowAccent, 0.0f, windowTint, 0.0f, paleBase};
+        }
+        const Math::Hsv hsv = Math::rgbToHsv(baseAccent);
+        const bool achromatic = (hsv.s < 0.18f);
+        const float h = achromatic ? 195.0f : hsv.h;
+        const float effS = achromatic ? 0.72f : Math::clampf(std::max(hsv.s, 0.68f), 0.68f, 0.92f);
+        const float effV = achromatic ? 0.90f : Math::clampf(std::max(hsv.v, 0.85f), 0.85f, 0.96f);
+        if (role == ButtonColorRole::Minimize) {
+            return ButtonColorSpec{
+                toQColor(Math::hsvToRgb(h - 30.0f, effS * 0.88f, effV)),
+                interactive ? 0.34f : 0.18f * inactiveFillScale,
+                interactive ? 1.0f : 0.88f,
+                0.65f,
+                0.26f,
+            };
+        }
+        if (role == ButtonColorRole::Maximize) {
+            return ButtonColorSpec{
+                toQColor(Math::hsvToRgb(h + 30.0f, effS * 0.92f, effV)),
+                interactive ? 0.34f : 0.18f * inactiveFillScale,
+                interactive ? 1.0f : 0.88f,
+                0.65f,
+                0.26f,
+            };
+        }
+        return ButtonColorSpec{
+            toQColor(Math::hsvToRgb(h + 175.0f, std::max(effS, 0.86f), 0.96f)),
+            interactive ? 0.45f : 0.28f * inactiveFillScale,
+            interactive ? 1.0f : 0.95f,
+            0.55f,
+            0.26f,
+        };
+    }
+
+    if (colorMode == int(ButtonColorMode::SmokedChrome)) {
+        if (interactive) {
+            if (isClose) {
+                return ButtonColorSpec{
+                    toQColor(Math::closeButtonAccent(baseAccent)),
+                    0.42f,
+                    1.0f,
+                    0.75f,
+                    0.28f,
+                };
+            }
+            return ButtonColorSpec{
+                windowAccent,
+                0.20f,
+                0.90f,
+                0.85f,
+                paleBase,
+            };
+        }
+        return ButtonColorSpec{
+            toQColor(Math::mix3({0.60f, 0.64f, 0.68f}, baseAccent, 0.18f)),
+            0.0f,
+            0.45f,
+            1.0f,
+            0.48f,
+        };
+    }
+
+    // Mode 0: Monochrome
+    if (isClose && interactive) {
+        return ButtonColorSpec{
+            toQColor(Math::closeButtonAccent(baseAccent)),
+            0.35f,
+            1.0f,
+            0.20f,
+            0.35f,
+        };
+    }
+    return ButtonColorSpec{windowAccent, 0.0f, windowTint, 0.0f, paleBase};
+}
+
+inline QColor buttonGlyphColor(const ButtonColorSpec &spec,
+                               const MaterialConfig &cfg,
+                               bool active,
+                               bool opticalMaterial,
+                               bool enabled,
+                               bool stealthIdle = false)
+{
+    if (!enabled) {
+        return QColor("#7c9184");
+    }
+    const QColor light = active ? QColor("#effff6") : QColor("#d9e8e0");
+    const QColor dark = active ? QColor("#14201c") : QColor("#253029");
+    if (spec.fillBoost >= 0.12f) {
+        return light;
+    }
+    const bool darkTitle = relativeLuminance(cfg.titleColorForWindow(active, opticalMaterial)) < 0.2f;
+    if (stealthIdle) {
+        return darkTitle ? dark : light;
+    }
+    if (!darkTitle) {
+        return light;
+    }
+    const Math::Vec3 base{float(spec.color.redF()), float(spec.color.greenF()), float(spec.color.blueF())};
+    const Math::Vec3 neutral{0.18f, 0.20f, 0.21f};
+    Math::Vec3 body = opticalMaterial ? Math::mix3(base, neutral, cfg.frameOpacity) : neutral;
+    const float baseTint = std::clamp(spec.effectiveTint, 0.0f, 1.0f);
+    const float tintMul = baseTint * 0.65f;
+    body.x *= Math::mixf(1.0f, base.x * 0.8f + 0.2f, tintMul);
+    body.y *= Math::mixf(1.0f, base.y * 0.8f + 0.2f, tintMul);
+    body.z *= Math::mixf(1.0f, base.z * 0.8f + 0.2f, tintMul);
+    body = Math::mix3(body, {base.x * 0.45f, base.y * 0.45f, base.z * 0.45f}, baseTint * 0.20f);
+    body = Math::boostTint(body, base, spec.effectiveTint);
+    body = {
+        Math::clampf(body.x * 0.68f + base.x * 0.11f, 0.0f, 1.0f),
+        Math::clampf(body.y * 0.68f + base.y * 0.11f, 0.0f, 1.0f),
+        Math::clampf(body.z * 0.68f + base.z * 0.11f, 0.0f, 1.0f),
+    };
+    const float bgLuma = relativeLuminance(QColor::fromRgbF(body.x, body.y, body.z));
+    auto contrast = [bgLuma](const QColor &fg) {
+        const float fgLuma = relativeLuminance(fg);
+        return (std::max(bgLuma, fgLuma) + 0.05f) / (std::min(bgLuma, fgLuma) + 0.05f);
+    };
+    return contrast(dark) > contrast(light) ? dark : light;
 }
 
 // Renders the exact SDF glass frame surface (matching preview/glass.frag) into a cached QImage.
@@ -477,7 +867,9 @@ inline void paintButtonGlass(QPainter *p,
                              bool hovered,
                              bool pressed,
                              const QPointF &pointer,
-                             const MaterialConfig &cfg)
+                             const MaterialConfig &cfg,
+                             const ButtonRadii &radii = ButtonRadii{3.0f, 3.0f, 3.0f, 3.0f},
+                             const ButtonColorSpec *colorSpec = nullptr)
 {
     const float scale = std::max(float(dpr), 1.0f);
     const float invScale = 1.0f / scale;
@@ -488,12 +880,27 @@ inline void paintButtonGlass(QPainter *p,
     QImage img(pixelSize, QImage::Format_ARGB32_Premultiplied);
     img.fill(Qt::transparent);
 
-    const bool closeFeedback = isCloseButton && (hovered || pressed);
+    const bool stealthIdle = (cfg.buttonShape == int(ButtonShape::StealthLens)) && !hovered && !pressed;
+    const bool joined = (cfg.buttonShape == int(ButtonShape::JoinedStrip)) || (cfg.buttonShape == int(ButtonShape::TopDockedTabs));
+    const bool seamLeft = joined && radii.bl < 1.0f;
+    const bool seamRight = joined && radii.br < 1.0f;
+    const bool topDocked = (cfg.buttonShape == int(ButtonShape::TopDockedTabs));
+
+    const bool closeFeedback = !colorSpec && isCloseButton && (hovered || pressed);
     const Math::Vec3 baseAccent{float(accentColor.redF()), float(accentColor.greenF()), float(accentColor.blueF())};
-    const Math::Vec3 accent = closeFeedback ? Math::closeButtonAccent(baseAccent) : baseAccent;
-    const float restrainedLight = closeFeedback ? 0.35f
+    Math::Vec3 accent = closeFeedback ? Math::closeButtonAccent(baseAccent) : baseAccent;
+    float restrainedLight = closeFeedback ? 0.35f
         : Math::smoothstep(0.40f, 0.70f, std::min({baseAccent.x, baseAccent.y, baseAccent.z}));
-    const Math::Vec3 lightingAccent = closeFeedback ? Math::mix3(baseAccent, accent, 0.20f) : accent;
+    Math::Vec3 lightingAccent = closeFeedback ? Math::mix3(baseAccent, accent, 0.20f) : accent;
+    float fillBoost = closeFeedback ? 0.35f : 0.0f;
+    float effectiveTintValue = closeFeedback ? 1.0f : tintStrength;
+    if (colorSpec) {
+        accent = {float(colorSpec->color.redF()), float(colorSpec->color.greenF()), float(colorSpec->color.blueF())};
+        restrainedLight = Math::clampf(colorSpec->restrainedLight, 0.0f, 1.0f);
+        lightingAccent = Math::mix3(baseAccent, accent, Math::clampf(colorSpec->rimBlend, 0.0f, 1.0f));
+        fillBoost = std::max(colorSpec->fillBoost, 0.0f);
+        effectiveTintValue = colorSpec->effectiveTint;
+    }
     constexpr float hx = -0.2073f;
     constexpr float hy = -0.3524f;
     constexpr float hz = 0.9124f;
@@ -504,6 +911,8 @@ inline void paintButtonGlass(QPainter *p,
     const float by = float(buttonRect.y());
     const float bw = float(buttonRect.width());
     const float bh = float(buttonRect.height());
+    const float evalBx = seamLeft ? bx - 4.0f : bx;
+    const float evalBw = bw + (seamLeft ? 4.0f : 0.0f) + (seamRight ? 4.0f : 0.0f);
     const float aaBand = 0.65f / scale;
     const float epsilon = 0.45f;
 
@@ -512,19 +921,36 @@ inline void paintButtonGlass(QPainter *p,
         const float y = float(aligned.y()) + (float(py) + 0.5f) * invScale;
         for (int px = 0; px < pixelSize.width(); ++px) {
             const float x = float(aligned.x()) + (float(px) + 0.5f) * invScale;
-            const float d = Math::boxDistance(x, y, bx, by, bw, bh, 3.0f);
+            if ((seamLeft && x < bx) || (seamRight && x >= bx + bw)) {
+                continue;
+            }
+            const float d = Math::roundedBoxDistance(x, y, evalBx, by, evalBw, bh, radii);
             const float coverage = 1.0f - Math::smoothstep(-aaBand, aaBand, d);
             if (coverage <= 0.001f) {
                 continue;
             }
 
-            const float gx = Math::boxDistance(x + epsilon, y, bx, by, bw, bh, 3.0f)
-                           - Math::boxDistance(x - epsilon, y, bx, by, bw, bh, 3.0f);
-            const float gy = Math::boxDistance(x, y + epsilon, bx, by, bw, bh, 3.0f)
-                           - Math::boxDistance(x, y - epsilon, bx, by, bw, bh, 3.0f);
+            const float gx = Math::roundedBoxDistance(x + epsilon, y, evalBx, by, evalBw, bh, radii)
+                           - Math::roundedBoxDistance(x - epsilon, y, evalBx, by, evalBw, bh, radii);
+            const float gy = Math::roundedBoxDistance(x, y + epsilon, evalBx, by, evalBw, bh, radii)
+                           - Math::roundedBoxDistance(x, y - epsilon, evalBx, by, evalBw, bh, radii);
             const float glen = std::max(std::sqrt(gx * gx + gy * gy), 0.0001f);
             const float dx = gx / glen;
             const float dy = gy / glen;
+
+            const float cArg = (d + 0.65f * invScale) * scale / 0.48f;
+            const float contour = std::exp(-cArg * cArg);
+
+            if (stealthIdle) {
+                Math::Vec3 stealth{0.06f, 0.08f, 0.09f};
+                const float stealthTint = std::clamp(effectiveTintValue, 0.0f, 1.0f);
+                stealth = Math::mix3(stealth, accent, Math::clampf(stealthTint * 0.18f + fillBoost * 0.45f, 0.0f, 0.65f));
+                const Math::Vec3 rim = Math::mix3(lightingAccent, {1.0f, 1.0f, 1.0f}, 0.40f);
+                stealth = Math::mix3(stealth, rim, contour * 0.42f);
+                const float alpha = Math::clampf(0.16f + fillBoost * 0.28f + contour * 0.18f, 0.0f, 0.72f) * coverage;
+                scanline[px] = Math::toPremultipliedRgb(stealth, alpha);
+                continue;
+            }
 
             const float bevel = std::exp(-std::max(-d, 0.0f) / 4.0f);
             const float normalSign = pressed ? -0.8f : 1.6f;
@@ -537,16 +963,16 @@ inline void paintButtonGlass(QPainter *p,
             nz /= nlen;
 
             Math::Vec3 color{0.18f, 0.20f, 0.21f};
-            const float baseTint = closeFeedback ? 1.0f : std::clamp(tintStrength, 0.0f, 1.0f);
+            const float baseTint = std::clamp(effectiveTintValue, 0.0f, 1.0f);
             const float tintMul = baseTint * 0.65f;
             color.x *= Math::mixf(1.0f, accent.x * 0.8f + 0.2f, tintMul);
             color.y *= Math::mixf(1.0f, accent.y * 0.8f + 0.2f, tintMul);
             color.z *= Math::mixf(1.0f, accent.z * 0.8f + 0.2f, tintMul);
             color = Math::mix3(color, {accent.x * 0.45f, accent.y * 0.45f, accent.z * 0.45f}, baseTint * 0.20f);
-            color = Math::boostTint(color, accent, tintStrength);
-            if (closeFeedback) {
+            color = Math::boostTint(color, accent, effectiveTintValue);
+            if (fillBoost > 0.001f) {
                 const float depth = Math::smoothstep(0.0f, 4.0f, std::max(-d, 0.0f));
-                color = Math::mix3(color, {accent.x * 0.65f, accent.y * 0.65f, accent.z * 0.65f}, 0.35f * depth);
+                color = Math::mix3(color, {accent.x * 0.65f, accent.y * 0.65f, accent.z * 0.65f}, fillBoost * depth);
             }
 
             const float ndoth = std::max(nx * hx + ny * hy + nz * hz, 0.0f);
@@ -566,14 +992,21 @@ inline void paintButtonGlass(QPainter *p,
             color.y += specTint.y * specAdd;
             color.z += specTint.z * specAdd;
 
-            const float cArg = (d + 0.65f * invScale) * scale / 0.48f;
-            const float contour = std::exp(-cArg * cArg);
             const Math::Vec3 contourColor = Math::mix3(lightingAccent, {1.0f, 1.0f, 1.0f},
                 std::max(directionalEdge, 0.0f) * Math::mixf(0.7f, 0.25f, restrainedLight));
             color = Math::mix3(color, contourColor, contour * Math::mixf(0.82f, 0.60f, restrainedLight));
 
             const float lArg = (d + 1.65f * invScale) * scale / 0.65f;
-            const float darkLip = std::exp(-lArg * lArg);
+            float darkLip = std::exp(-lArg * lArg);
+            if (seamLeft && x - bx < 3.0f) {
+                darkLip *= Math::smoothstep(0.0f, 3.0f, x - bx);
+            }
+            if (seamRight && (bx + bw) - x < 3.0f) {
+                darkLip *= Math::smoothstep(0.0f, 3.0f, (bx + bw) - x);
+            }
+            if (topDocked && y - by < 3.0f) {
+                darkLip *= Math::smoothstep(0.0f, 3.0f, y - by);
+            }
             const float lipMul = 1.0f - darkLip * 0.24f;
             color.x *= lipMul;
             color.y *= lipMul;
@@ -592,6 +1025,20 @@ inline void paintButtonGlass(QPainter *p,
             color.x += topHighlight.x * topFactor + accent.x * 0.11f;
             color.y += topHighlight.y * topFactor + accent.y * 0.11f;
             color.z += topHighlight.z * topFactor + accent.z * 0.11f;
+
+            if (seamLeft) {
+                const float seamDist = (x - bx) * scale;
+                const float divider = std::exp(-(seamDist / 0.9f) * (seamDist / 0.9f));
+                const Math::Vec3 dividerColor = Math::mix3(lightingAccent, {1.0f, 1.0f, 1.0f}, 0.55f);
+                color = Math::mix3(color, dividerColor, divider * 0.35f);
+            }
+            if (seamRight) {
+                const float seamDist = ((bx + bw) - x) * scale;
+                const float divider = std::exp(-(seamDist / 0.9f) * (seamDist / 0.9f));
+                color.x *= 1.0f - divider * 0.38f;
+                color.y *= 1.0f - divider * 0.38f;
+                color.z *= 1.0f - divider * 0.38f;
+            }
 
             if (hovered) {
                 const float distPtr = std::hypot(x - float(pointer.x()), y - float(pointer.y()));

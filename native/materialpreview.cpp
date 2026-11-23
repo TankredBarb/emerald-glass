@@ -20,6 +20,16 @@ static void initializeMaterialResources()
 
 namespace EmeraldGlass {
 
+namespace {
+inline ButtonColorRole buttonColorRoleForPreviewChar(QChar type)
+{
+    if (type == QLatin1Char('I')) return ButtonColorRole::Minimize;
+    if (type == QLatin1Char('A')) return ButtonColorRole::Maximize;
+    if (type == QLatin1Char('X')) return ButtonColorRole::Close;
+    return ButtonColorRole::Other;
+}
+} // namespace
+
 MaterialPreview::MaterialPreview(QWidget *parent, const QString &shaderPath, int closePreviewStyle)
     : QWidget(parent)
     , m_shaderPath(shaderPath.isEmpty() ? QStringLiteral(":/emeraldglass/preview/glass.frag") : shaderPath)
@@ -50,6 +60,14 @@ MaterialPreview::~MaterialPreview()
 void MaterialPreview::setConfig(const MaterialConfig &cfg)
 {
     m_cfg = cfg;
+    update();
+}
+
+void MaterialPreview::setDesktopBackdrop(const QImage &image, int blurFinetune)
+{
+    m_desktopBackdrop = image;
+    m_desktopBlurFinetune = blurFinetune;
+    m_desktopMode = true;
     update();
 }
 
@@ -111,6 +129,7 @@ PreviewFrame MaterialPreview::sampleFrame(const QRectF &box, bool active) const
     PreviewFrame sample;
     sample.frame = box; sample.content = content(box); sample.active = active;
     sample.radius = m_cfg.cornerRadius; sample.pointer = m_pointer;
+    sample.buttonShape = m_cfg.buttonShape;
     const KConfigGroup settings(KSharedConfig::openConfig(QStringLiteral("kwinrc")), QStringLiteral("org.kde.kdecoration2"));
     auto visible = [&](QString types) {
         QString result;
@@ -123,32 +142,58 @@ PreviewFrame MaterialPreview::sampleFrame(const QRectF &box, bool active) const
     };
     const QString left = m_cfg.useSystemButtons ? visible(settings.readEntry("ButtonsOnLeft", QStringLiteral("MS"))) : QString();
     const QString right = m_cfg.useSystemButtons ? visible(settings.readEntry("ButtonsOnRight", QStringLiteral("HIAX"))) : QStringLiteral("IAX");
-    auto groupWidth = [](const QString &types) {
+    const qreal spacing = buttonSpacingForShape(m_cfg.buttonShape);
+    auto groupWidth = [&](const QString &types) {
         qreal width = 0;
-        for (QChar type : types) width += (type == QLatin1Char('_') ? 10 : 27) + 3;
-        return std::max(0.0, width - 3);
+        for (QChar type : types) {
+            width += buttonSizeForShape(m_cfg.buttonShape, type == QLatin1Char('X'), type == QLatin1Char('_')).width() + spacing;
+        }
+        return types.isEmpty() ? 0.0 : std::max(0.0, width - spacing);
     };
     auto append = [&](const QString &types, qreal x) {
-        const qreal y = box.y() + std::max(2.0, std::floor((m_cfg.titleHeight - 23.0) * 0.5));
-        for (QChar type : types) {
+        const qreal y = box.y() + buttonTopYForShape(m_cfg.buttonShape, m_cfg.titleHeight, false);
+        for (int i = 0; i < types.size(); ++i) {
+            const QChar type = types[i];
+            const QSizeF sz = buttonSizeForShape(m_cfg.buttonShape, type == QLatin1Char('X'), type == QLatin1Char('_'));
             if (type != QLatin1Char('_')) {
+                const bool joinedLeft = (i > 0) && types[i - 1] != QLatin1Char('_');
+                const bool joinedRight = (i + 1 < types.size()) && types[i + 1] != QLatin1Char('_');
+                const ButtonRadii rad = buttonRadiiForShape(m_cfg.buttonShape, joinedLeft, joinedRight);
                 if (type == QLatin1Char('X')) sample.closeButton = sample.buttons.size();
-                sample.buttons.append(QRectF(x, y, 27, 23));
+                sample.buttons.append(QRectF(QPointF(x, y), sz));
+                sample.buttonRadii.append(QVector4D(rad.tl, rad.tr, rad.br, rad.bl));
                 sample.buttonTypes += type;
                 if (sample.buttons.last().contains(m_pointer)) sample.hoverButton = sample.buttons.size() - 1;
             }
-            x += (type == QLatin1Char('_') ? 10 : 27) + 3;
+            x += sz.width() + spacing;
         }
     };
-    append(left, box.x() + 14);
-    append(right, std::max(box.x() + 14, box.right() - groupWidth(right) - 17));
+    const qreal leftEdge = buttonEdgeInsetForShape(m_cfg.buttonShape, m_cfg.cornerRadius, true);
+    const qreal rightEdge = buttonEdgeInsetForShape(m_cfg.buttonShape, m_cfg.cornerRadius, false);
+    append(left, box.x() + leftEdge);
+    append(right, std::max(box.x() + leftEdge, box.right() - groupWidth(right) - rightEdge));
     if (m_closePreviewState >= 0 && sample.closeButton >= 0) {
         sample.hoverButton = m_closePreviewState == 1 ? sample.closeButton : -1;
         sample.pressedButton = m_closePreviewState == 2 ? sample.closeButton : -1;
         sample.pointer = m_closePreviewState > 0 ? sample.buttons[sample.closeButton].center() : QPointF(-100, -100);
     }
-    const qreal leftInset = left.isEmpty() ? 17 : 14 + groupWidth(left) + 10;
-    const qreal rightInset = right.isEmpty() ? 17 : 17 + groupWidth(right) + 10;
+    const QColor windowAccent = m_cfg.colorForWindow(active);
+    const float windowTint = m_cfg.tintForWindow(active);
+    for (int i = 0; i < sample.buttons.size(); ++i) {
+        const ButtonColorSpec spec = resolveButtonColor(
+            windowAccent,
+            windowTint,
+            m_cfg.buttonColorMode,
+            buttonColorRoleForPreviewChar(sample.buttonTypes[i]),
+            i == sample.hoverButton,
+            i == sample.pressedButton,
+            active);
+        sample.buttonColors.append(QVector4D(float(spec.color.redF()), float(spec.color.greenF()),
+                                             float(spec.color.blueF()), 1.0f + spec.fillBoost));
+        sample.buttonColorMeta.append(QVector4D(spec.effectiveTint, spec.rimBlend, spec.restrainedLight, 0.0f));
+    }
+    const qreal leftInset = left.isEmpty() ? 17.0 : leftEdge + groupWidth(left) + 10.0;
+    const qreal rightInset = right.isEmpty() ? 17.0 : rightEdge + groupWidth(right) + 10.0;
     sample.titleRect = box.adjusted(leftInset, 0, -rightInset, 0);
     sample.titleRect.setHeight(m_cfg.titleHeight - 1);
     return sample;
@@ -195,7 +240,7 @@ QImage MaterialPreview::renderImage(const QSizeF &size, qreal dpr, const Preview
         QPainter painter(&image);
         const qreal sampleWidth = (size.width() - 36.0) * 0.5;
         for (int i = 0; i < 2; ++i)
-            drawSample(painter, QRectF(12 + i * (12 + sampleWidth), 10, sampleWidth, size.height() - 20), i == 0, false);
+            drawSample(painter, sampleFrame(QRectF(12 + i * (12 + sampleWidth), 10, sampleWidth, size.height() - 20), i == 0), false);
         return image;
     }
     if (!m_vao || !m_context.makeCurrent(&m_surface)) return {};
@@ -230,23 +275,29 @@ QImage MaterialPreview::render(const QSizeF &size, qreal dpr, const PreviewFrame
     backdrop.setDevicePixelRatio(dpr);
     {
         QPainter p(&backdrop);
-        QLinearGradient bg(0, 0, width, height);
-        bg.setColorAt(0.0, QColor("#123943"));
-        bg.setColorAt(0.5, QColor("#617d88"));
-        bg.setColorAt(1.0, QColor("#e7d9b8"));
-        p.fillRect(QRectF(QPointF(), size), bg);
-        // Fine lines and broad color transitions reveal lensing at realistic blur levels.
-        p.setPen(QPen(QColor(235, 250, 255, 160), 4));
-        for (int x = -height; x < width; x += 32) {
-            p.drawLine(QPoint(x, 0), QPoint(x + height, height));
+        if (m_desktopBackdrop.isNull()) {
+            QLinearGradient bg(0, 0, width, height);
+            bg.setColorAt(0.0, QColor("#123943"));
+            bg.setColorAt(0.5, QColor("#617d88"));
+            bg.setColorAt(1.0, QColor("#e7d9b8"));
+            p.fillRect(QRectF(QPointF(), size), bg);
+            // Fine lines and broad color transitions reveal lensing at realistic blur levels.
+            p.setPen(QPen(QColor(235, 250, 255, 160), 4));
+            for (int x = -height; x < width; x += 32) {
+                p.drawLine(QPoint(x, 0), QPoint(x + height, height));
+            }
+            for (int y = 24; y < height; y += 48) {
+                p.fillRect(QRect(0, y, width, 12), QColor(5, 14, 24, 190));
+            }
+            p.setPen(QPen(QColor(245, 175, 70, 180), 12));
+            p.drawLine(QPointF(width * 0.15, 0), QPointF(width * 0.45, height));
+            p.setPen(QPen(QColor(40, 130, 245, 190), 14));
+            p.drawLine(QPointF(width * 0.8, 0), QPointF(width * 0.6, height));
+        } else {
+            const auto scaled = m_desktopBackdrop.scaled(pixels, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+            p.drawImage(QRectF(QPointF(), size), scaled,
+                QRectF((scaled.width() - pixels.width()) / 2, (scaled.height() - pixels.height()) / 2, pixels.width(), pixels.height()));
         }
-        for (int y = 24; y < height; y += 48) {
-            p.fillRect(QRect(0, y, width, 12), QColor(5, 14, 24, 190));
-        }
-        p.setPen(QPen(QColor(245, 175, 70, 180), 12));
-        p.drawLine(QPointF(width * 0.15, 0), QPointF(width * 0.45, height));
-        p.setPen(QPen(QColor(40, 130, 245, 190), 14));
-        p.drawLine(QPointF(width * 0.8, 0), QPointF(width * 0.6, height));
     }
 
     const QImage texture = backdrop.convertToFormat(QImage::Format_RGBA8888).flipped(Qt::Vertical);
@@ -256,8 +307,8 @@ QImage MaterialPreview::render(const QSizeF &size, qreal dpr, const PreviewFrame
 
     const KConfigGroup settings(KSharedConfig::openConfig(QStringLiteral("kwinrc")), QStringLiteral("Effect-emeraldglass"));
     const KConfigGroup standardBlur(KSharedConfig::openConfig(QStringLiteral("kwinrc")), QStringLiteral("Effect-blur"));
-    const float backdropSaturation = std::max(0, standardBlur.readEntry("Saturation", 100)) / 100.0f;
-    const float blurScale = 0.5f + std::clamp(settings.readEntry("BlurFinetune", 3), 0, 10) * 0.13f;
+    const float backdropSaturation = m_desktopMode ? 1.0f : std::max(0, standardBlur.readEntry("Saturation", 100)) / 100.0f;
+    const float blurScale = 0.5f + (m_desktopMode ? m_desktopBlurFinetune : std::clamp(settings.readEntry("BlurFinetune", 3), 0, 10)) * 0.13f;
     auto pass = [&](QOpenGLShaderProgram &shader, int source, int destination) {
         m_buffers[destination]->bind();
         const QSize size = m_buffers[destination]->size();
@@ -306,11 +357,24 @@ QImage MaterialPreview::render(const QSizeF &size, qreal dpr, const PreviewFrame
             m_material->setUniformValue("resolution", QVector2D(width, height));
             m_material->setUniformValue("frameRect", rectUniform(sample.frame));
             m_material->setUniformValue("contentRect", rectUniform(sample.content));
+            m_material->setUniformValue("buttonShape", sample.buttonShape);
             m_material->setUniformValue("buttonCount", std::min(12, int(sample.buttons.size())));
             m_material->setUniformValue("buttonCloseIndex", sample.closeButton);
             for (int j = 0; j < std::min(12, int(sample.buttons.size())); ++j) {
                 const QByteArray name = QByteArray("buttonRect[") + QByteArray::number(j) + ']';
                 m_material->setUniformValue(name.constData(), rectUniform(sample.buttons[j]));
+                const QByteArray radName = QByteArray("buttonRadii[") + QByteArray::number(j) + ']';
+                const QVector4D rad = j < sample.buttonRadii.size() ? sample.buttonRadii[j] : QVector4D(3, 3, 3, 3);
+                m_material->setUniformValue(radName.constData(), rad);
+                const QByteArray colName = QByteArray("buttonColor[") + QByteArray::number(j) + ']';
+                const QByteArray metaName = QByteArray("buttonColorMeta[") + QByteArray::number(j) + ']';
+                if (m_closePreviewStyle < 0 && j < sample.buttonColors.size()) {
+                    m_material->setUniformValue(colName.constData(), sample.buttonColors[j]);
+                    m_material->setUniformValue(metaName.constData(), j < sample.buttonColorMeta.size() ? sample.buttonColorMeta[j] : QVector4D(0.7f, 0, 0, 0));
+                } else {
+                    m_material->setUniformValue(colName.constData(), QVector4D(0, 0, 0, 0));
+                    m_material->setUniformValue(metaName.constData(), QVector4D(0, 0, 0, 0));
+                }
             }
             const QColor accent = m_cfg.colorForWindow(sample.active);
             m_material->setUniformValue("accent", QVector3D(accent.redF(), accent.greenF(), accent.blueF()));
@@ -338,14 +402,16 @@ QImage MaterialPreview::render(const QSizeF &size, qreal dpr, const PreviewFrame
     image.setDevicePixelRatio(dpr);
     if (singleFrame) return image;
     QPainter overlay(&image);
-    drawSample(overlay, frames[0].frame, true, gpu && m_cfg.shaderEffectEnabled);
-    drawSample(overlay, frames[1].frame, false, gpu && m_cfg.shaderEffectEnabled);
+    drawSample(overlay, frames[0], gpu && m_cfg.shaderEffectEnabled);
+    drawSample(overlay, frames[1], gpu && m_cfg.shaderEffectEnabled);
     overlay.end();
     return image;
 }
 
-void MaterialPreview::drawSample(QPainter &p, const QRectF &box, bool active, bool gpu)
+void MaterialPreview::drawSample(QPainter &p, const PreviewFrame &sample, bool gpu)
 {
+    const QRectF box = sample.frame;
+    const bool active = sample.active;
     p.setRenderHint(QPainter::Antialiasing);
     const QRectF client = content(box);
     p.fillRect(client, active ? QColor("#14262d") : QColor("#283037"));
@@ -367,14 +433,25 @@ void MaterialPreview::drawSample(QPainter &p, const QRectF &box, bool active, bo
         glow.setColorAt(0, color); color.setAlphaF(0); glow.setColorAt(1, color);
         p.fillPath(frame.subtracted(hole), glow);
     }
-    const auto sample = sampleFrame(box, active);
     for (int i = 0; i < sample.buttons.size(); ++i) {
         const QRectF b = sample.buttons[i];
         const QChar type = sample.buttonTypes[i];
-        const bool hovered = b.contains(m_pointer);
-        if (!gpu) paintButtonGlass(&p, b, dpr, m_cfg.colorForWindow(active), m_cfg.tintForWindow(active), i == sample.closeButton, hovered, false, m_pointer, m_cfg);
+        const bool hovered = (i == sample.hoverButton);
+        const bool pressed = (i == sample.pressedButton);
+        const QVector4D radVec = i < sample.buttonRadii.size() ? sample.buttonRadii[i] : QVector4D(3, 3, 3, 3);
+        const ButtonRadii rad{radVec.x(), radVec.y(), radVec.z(), radVec.w()};
+        const ButtonColorSpec colorSpec = resolveButtonColor(
+            m_cfg.colorForWindow(active),
+            m_cfg.tintForWindow(active),
+            m_cfg.buttonColorMode,
+            buttonColorRoleForPreviewChar(type),
+            hovered,
+            pressed,
+            active);
+        if (!gpu) paintButtonGlass(&p, b, dpr, m_cfg.colorForWindow(active), m_cfg.tintForWindow(active), i == sample.closeButton, hovered, pressed, m_pointer, m_cfg, rad, m_closePreviewStyle < 0 ? &colorSpec : nullptr);
         const QPointF c = b.center() + QPointF(0, i == sample.pressedButton ? 1 : 0);
-        p.setPen(QPen(QColor("#effff6"), 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        const bool stealthIdle = (m_cfg.buttonShape == int(ButtonShape::StealthLens)) && !hovered && !pressed;
+        p.setPen(QPen(buttonGlyphColor(colorSpec, m_cfg, active, gpu, true, stealthIdle), 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         p.setBrush(Qt::NoBrush);
         if (type == QLatin1Char('I')) p.drawLine(c + QPointF(-4, 3), c + QPointF(4, 3));
         else if (type == QLatin1Char('A')) p.drawRect(QRectF(c - QPointF(4, 3.5), QSizeF(8, 7)));
