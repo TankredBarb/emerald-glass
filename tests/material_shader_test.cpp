@@ -499,5 +499,81 @@ int main(int argc,char **argv) {
                                                        {{{0.95f,0.55f,0.28f,0},{0.95f,0.55f,0.28f,0},{0.95f,0.55f,0.28f,0}}});
         require(stealthJewelZero!=stealthMonoZero,"StealthLens idle respects per-button effectiveTint and fillBoost when global tint is zero");
     }
+    // Verify all 4 GPU Duo-Tone Gradient modes (HorizontalSweep, DiagonalPrism, CenterAura, RimEdgeSplit).
+    {
+        count(0);
+        glUniform1i(loc("opticsDisabled"),0);
+        glUniform1i(loc("buttonShape"),0);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA32F,1,1,0,GL_RGBA,GL_FLOAT,tealBackdrop);
+        one("scale",1.0f); one("frameOpacity",.75f); one("tint",.85f); one("refraction",.85f);
+        one("dispersion",.25f); one("specularStrength",1.0f); one("hoverGlowStrength",0.0f);
+        one("adaptiveContrast",0.0f);
+        glUniform3f(loc("accent"),0.09f,0.96f,0.35f);
+        glUniform3f(loc("accentSecondary"),0.08f,0.85f,1.0f);
+
+        glUniform1i(loc("gradientMode"),0);
+        const auto solidImg=render(128);
+        std::array<std::vector<unsigned char>,4> gradImgs;
+        for(int gm=1; gm<=4; ++gm) {
+            glUniform1i(loc("gradientMode"),gm);
+            gradImgs[gm-1]=render(128);
+            require(gradImgs[gm-1]!=solidImg,"each GPU gradient mode renders distinctly from Solid");
+            for(int i=0;i<int(gradImgs[gm-1].size());i+=4) for(int k=0;k<3;++k)
+                require(gradImgs[gm-1][i+k]<=gradImgs[gm-1][i+3]+1,"gradient modes maintain premultiplied RGBA output");
+        }
+        // HorizontalSweep (gradImgs[0]) must shift blue channel and blue-green balance left-to-right toward Aqua.
+        const int leftTitle=((127-20)*128+14)*4;
+        const int rightTitle=((127-20)*128+114)*4;
+        require(gradImgs[0][rightTitle+2]>=gradImgs[0][leftTitle+2]+12 &&
+                (int(gradImgs[0][rightTitle+2])-int(gradImgs[0][rightTitle+1])) >
+                (int(gradImgs[0][leftTitle+2])-int(gradImgs[0][leftTitle+1]))+15,
+                "GPU HorizontalSweep shifts titlebar hue left-to-right toward secondary Aqua");
+        // DiagonalPrism (gradImgs[1]) transitions diagonally toward bottom-right / right-lower titlebar.
+        const int diagTopLeft=((127-14)*128+14)*4;
+        const int diagBotRight=((127-30)*128+114)*4;
+        require((int(gradImgs[1][diagBotRight+2])-int(gradImgs[1][diagBotRight+1])) >
+                (int(gradImgs[1][diagTopLeft+2])-int(gradImgs[1][diagTopLeft+1]))+12,
+                "GPU DiagonalPrism shifts hue from top-left Emerald toward bottom-right Aqua");
+        // CenterAura (gradImgs[2]) peaks near titlebar center (62, 22) compared to both edges (10, 22) and (118, 22).
+        const int auraLeft=((127-22)*128+10)*4;
+        const int auraMid=((127-22)*128+62)*4;
+        const int auraRight=((127-22)*128+118)*4;
+        const int auraMidDiff=int(gradImgs[2][auraMid+2])-int(gradImgs[2][auraMid+1]);
+        const int auraLeftDiff=int(gradImgs[2][auraLeft+2])-int(gradImgs[2][auraLeft+1]);
+        const int auraRightDiff=int(gradImgs[2][auraRight+2])-int(gradImgs[2][auraRight+1]);
+        require(auraMidDiff>auraLeftDiff+15 && auraMidDiff>auraRightDiff+15,
+                "GPU CenterAura concentrates secondary Aqua glow in the center of the titlebar");
+        // RimEdgeSplit (gradImgs[3]) shifts the outer top rim (64, 0) toward Aqua compared to both deep interior (64, 24) and Solid.
+        const int rimTop=((127-0)*128+64)*4;
+        const int rimInner=((127-24)*128+64)*4;
+        const int rimDiff=int(gradImgs[3][rimTop+2])-int(gradImgs[3][rimTop+1]);
+        const int innerDiff=int(gradImgs[3][rimInner+2])-int(gradImgs[3][rimInner+1]);
+        const int solidRimDiff=int(solidImg[rimTop+2])-int(solidImg[rimTop+1]);
+        const int rimCyan=int(gradImgs[3][rimTop+2])-int(gradImgs[3][rimTop]);
+        const int solidRimCyan=int(solidImg[rimTop+2])-int(solidImg[rimTop]);
+        require(rimDiff>innerDiff+12 && rimDiff>solidRimDiff+10 && rimCyan>solidRimCyan+25,
+                "GPU RimEdgeSplit tints outer top rim toward secondary Aqua without recoloring the inner flat strip");
+
+        // Button rim lighting on HorizontalSweep must use local gradient Aqua instead of global left-side Emerald.
+        count(1);
+        glUniform1i(loc("buttonCloseIndex"),-1);
+        glUniform1i(loc("hoverButton"),-1);
+        glUniform1i(loc("pressedButton"),-1);
+        glUniform4f(loc("buttonRect[0]"),96,8,22,22);
+        glUniform4f(loc("buttonRadii[0]"),3,3,3,3);
+        glUniform4f(loc("buttonColor[0]"),0.08f,0.85f,1.0f,1.0f);
+        glUniform4f(loc("buttonColorMeta[0]"),0.85f,0.0f,0.0f,0.0f);
+        glUniform1i(loc("gradientMode"),1);
+        const auto sweepBtn=render(128);
+        glUniform1i(loc("gradientMode"),0);
+        glUniform3f(loc("accent"),0.08f,0.85f,1.0f);
+        const auto solidAquaBtn=render(128);
+        const int btnRim=((127-9)*128+107)*4;
+        for(int k=0;k<3;++k) {
+            require(std::abs(int(sweepBtn[btnRim+k])-int(solidAquaBtn[btnRim+k]))<=12,
+                    "GPU button rim lighting matches local Aqua gradient instead of leaking left-side Emerald");
+        }
+        count(0);
+    }
     std::cout<<"PASS: material controls, caption adaptation without tint, dark caption preservation, lower-window blur isolation, optics-off neutral blur and six-layer alpha preservation\n";
 }

@@ -14,6 +14,8 @@ uniform vec4 buttonColorMeta[12];
 uniform int buttonShape;
 uniform int buttonCloseIndex;
 uniform vec3 accent;
+uniform vec3 accentSecondary;
+uniform int gradientMode;
 uniform vec2 pointer;
 uniform float refraction;
 uniform float tint;
@@ -167,30 +169,76 @@ vec3 closeButtonAccent(vec3 base)
     return vec3(0.92, 0.08, 0.06);
 }
 
+void evalFrameGradient(vec2 p, float edgeFactor, out vec3 bodyAccent, out vec3 rimAccent)
+{
+    if (gradientMode <= 0) {
+        bodyAccent = accent;
+        rimAccent = accent;
+        return;
+    }
+    vec2 uvFrame = clamp((p - frameRect.xy) / max(frameRect.zw, vec2(1.0)), 0.0, 1.0);
+    if (gradientMode == 1) {
+        float t = smoothstep(0.08, 0.92, uvFrame.x);
+        bodyAccent = mix(accent, accentSecondary, t);
+        rimAccent = bodyAccent;
+        return;
+    }
+    if (gradientMode == 2) {
+        float t = smoothstep(0.12, 0.96, uvFrame.x * 0.72 + uvFrame.y * 0.38);
+        bodyAccent = mix(accent, accentSecondary, t);
+        rimAccent = bodyAccent;
+        return;
+    }
+    if (gradientMode == 3) {
+        float dist = length(vec2((uvFrame.x - 0.48) * 1.18, (uvFrame.y - 0.22) * 2.0));
+        float t = 1.0 - smoothstep(0.06, 0.56, dist);
+        bodyAccent = mix(accent, accentSecondary, t);
+        rimAccent = bodyAccent;
+        return;
+    }
+    if (gradientMode == 4) {
+        float bodyT = clamp(smoothstep(0.15, 0.95, uvFrame.y) * 0.24 + edgeFactor * 0.50, 0.0, 1.0);
+        float rimT = clamp(0.92 * edgeFactor + 0.45 * smoothstep(0.15, 0.90, uvFrame.y + uvFrame.x * 0.25), 0.0, 1.0);
+        bodyAccent = mix(accent, accentSecondary, bodyT);
+        rimAccent = mix(accent, accentSecondary, rimT);
+        return;
+    }
+    bodyAccent = accent;
+    rimAccent = accent;
+}
+
 vec4 buttonMaterial(vec2 p, float distance, int button)
 {
+    vec3 buttonBaseAccent = accent;
+    if (button >= 0 && gradientMode > 0 && gradientMode != 4) {
+        vec3 localBody;
+        vec3 localRim;
+        vec2 btnCenter = buttonRect[button].xy + buttonRect[button].zw * 0.5;
+        evalFrameGradient(btnCenter, 0.0, localBody, localRim);
+        buttonBaseAccent = localBody;
+    }
     bool hasButtonColor = button >= 0 && buttonColor[button].a > 0.5;
     bool closeFeedback = !hasButtonColor && button >= 0 && button == buttonCloseIndex
         && (button == hoverButton || button == pressedButton);
     vec3 materialAccent = hasButtonColor
         ? buttonColor[button].rgb
-        : (closeFeedback ? closeButtonAccent(accent) : accent);
+        : (closeFeedback ? closeButtonAccent(buttonBaseAccent) : buttonBaseAccent);
     // Pale glass and semantic Close feedback need headroom for the lens body.
     // Stacking white rim, top reflection and hover light used to clip them flat.
-    float restrainedLight = closeFeedback ? 1.0 : smoothstep(0.40, 0.70, min(min(accent.r, accent.g), accent.b));
+    float restrainedLight = closeFeedback ? 1.0 : smoothstep(0.40, 0.70, min(min(buttonBaseAccent.r, buttonBaseAccent.g), buttonBaseAccent.b));
 #if CLOSE_PREVIEW_STYLE > 0
     if (closeFeedback) restrainedLight = 0.35;
 #endif
     vec3 lightingAccent = materialAccent;
 #if CLOSE_PREVIEW_STYLE == 3
-    if (closeFeedback) lightingAccent = mix(accent, materialAccent, 0.20);
+    if (closeFeedback) lightingAccent = mix(buttonBaseAccent, materialAccent, 0.20);
 #endif
     float customFill = 0.0;
     float customTint = tint;
     if (hasButtonColor) {
         vec4 meta = buttonColorMeta[button];
         restrainedLight = clamp(meta.z, 0.0, 1.0);
-        lightingAccent = mix(accent, materialAccent, clamp(meta.y, 0.0, 1.0));
+        lightingAccent = mix(buttonBaseAccent, materialAccent, clamp(meta.y, 0.0, 1.0));
         customFill = max(buttonColor[button].a - 1.0, 0.0);
         customTint = meta.x;
     }
@@ -387,6 +435,10 @@ vec4 material(vec2 p, float distance, int button)
         boxDistance(p + vec2(0.0, epsilon), frameRect, radius) - boxDistance(p - vec2(0.0, epsilon), frameRect, radius));
     vec2 direction = gradient / max(length(gradient), 0.0001);
     float depth = max(-outer, 0.0);
+    float edgeFactor = exp(-depth / 3.4);
+    vec3 frameBodyAccent;
+    vec3 frameRimAccent;
+    evalFrameGradient(p, edgeFactor, frameBodyAccent, frameRimAccent);
     float opticalThickness = clamp(refraction / 1.8, 0.0, 1.0);
     // Keep the accepted shoulder near the usual 75% setting, with a useful
     // thickness range toward either end of the control.
@@ -407,11 +459,11 @@ vec4 material(vec2 p, float distance, int button)
     float alpha = mix(clamp(frameOpacity, 0.0, 1.0), 1.0, background.a);
     background.rgb = mix(background.rgb, vec3(0.22, 0.2288, 0.2332), clamp(frameOpacity, 0.0, 1.0) / max(alpha, 0.0001));
     float baseTint = clamp(tint, 0.0, 1.0) * frameOpacity;
-    vec3 color = background.rgb * mix(vec3(1.0), accent * 0.8 + 0.2, baseTint * 0.65);
-    color = mix(color, accent * 0.45, baseTint * 0.16);
+    vec3 color = background.rgb * mix(vec3(1.0), frameBodyAccent * 0.8 + 0.2, baseTint * 0.65);
+    color = mix(color, frameBodyAccent * 0.45, baseTint * 0.16);
     float luma = dot(color, vec3(0.299, 0.587, 0.114));
-    float accentLuma = dot(accent, vec3(0.299, 0.587, 0.114));
-    vec3 target = accentLuma <= 0.0001 ? vec3(luma) : accent * luma / accentLuma;
+    float accentLuma = dot(frameBodyAccent, vec3(0.299, 0.587, 0.114));
+    vec3 target = accentLuma <= 0.0001 ? vec3(luma) : frameBodyAccent * luma / accentLuma;
     float peak = max(max(target.r, target.g), target.b);
     float gamut = clamp((1.0 - luma) / max(peak - luma, 0.0001), 0.0, 1.0);
     color = mix(color, mix(vec3(luma), target, gamut), clamp(tint - 1.0, 0.0, 1.0));
@@ -420,7 +472,8 @@ vec4 material(vec2 p, float distance, int button)
     float lightFacing = dot(direction, normalize(vec2(-0.55, -1.0)));
     float rim = exp(-pow((outer + 0.65 / scale) * scale / 0.7, 2.0));
     float reflection = rim * (0.24 + 0.52 * abs(lightFacing)) * specularStrength;
-    color = mix(color, mix(vec3(1.0), accent, 0.12), clamp(reflection, 0.0, 1.0));
+    float rimTintMix = gradientMode == 4 ? 0.42 : 0.12;
+    color = mix(color, mix(vec3(1.0), frameRimAccent, rimTintMix), clamp(reflection, 0.0, 1.0));
     // The rolled edge reflects light as well as transmitting the scene. This
     // keeps thickness and color separation visible over a smooth/blurred wall.
     // Disperse the reflected light spatially, without recoloring the flat body.
@@ -435,7 +488,7 @@ vec4 material(vec2 p, float distance, int button)
     float chromaticReflection = dispersion * 0.8 * smoothstep(0.0, 0.4, refraction);
     vec3 edgeReflection = roll * (opticalThickness * 0.42 + chromaticReflection) * specularStrength
         * (0.35 + 0.65 * abs(lightFacing));
-    color = mix(color, mix(vec3(1.0), accent, 0.12), clamp(edgeReflection, vec3(0.0), vec3(1.0)));
+    color = mix(color, mix(vec3(1.0), frameRimAccent, rimTintMix), clamp(edgeReflection, vec3(0.0), vec3(1.0)));
 
     float innerShade = exp(-pow((depth - 2.5) / 1.8, 2.0));
     color *= 1.0 - innerShade * (1.0 - abs(lightFacing)) * 0.12 * specularStrength;

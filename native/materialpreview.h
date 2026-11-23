@@ -27,6 +27,8 @@ struct PreviewFrame {
     QPointF pointer{-100.0, -100.0};
     bool active = true;
     float radius = 5.0f;
+    int gradientMode = 0;
+    QColor secondaryColor;
     int buttonShape = 0;
     int closeButton = -1;
     int hoverButton = -1;

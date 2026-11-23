@@ -51,5 +51,19 @@ int main(int argc, char **argv)
         preview.setConfig(cfg);
         if (preview.grabFramebuffer() == monochromePreview) return 1;
     }
+    cfg.buttonColorMode = 0;
+    cfg.gradientMode = 0;
+    preview.setConfig(cfg);
+    const auto solidPreview = preview.grabFramebuffer();
+    for (int gradMode : {1, 2, 3, 4}) {
+        cfg.gradientMode = gradMode;
+        cfg.gradientActiveOnly = false;
+        preview.setConfig(cfg);
+        const auto withBoth = preview.grabFramebuffer();
+        if (withBoth == solidPreview) return 1;
+        cfg.gradientActiveOnly = true;
+        preview.setConfig(cfg);
+        if (preview.grabFramebuffer() == withBoth) return 1;
+    }
     std::cout << "PASS: graphics failure preserves native card and CPU KCM fallback\n";
 }

@@ -15,6 +15,7 @@
 #include <QGroupBox>
 #include <QComboBox>
 #include <QCheckBox>
+#include <QPushButton>
 #include <QSlider>
 #include <QTabWidget>
 #include <QTemporaryDir>
@@ -596,6 +597,156 @@ int main(int argc,char **argv) {
 
   module->defaults();
   check(colorModeCombo->currentData().toInt()==0,"Restore Defaults resets button color mode to Monochrome");
+ }
+ {
+  // Duo-Tone Gradient: persistence, clamping, Auto-Analogous palette, Active-Only focus toggle, KCM, and CPU rendering.
+  EmeraldGlass::MaterialConfig gradCfg;
+  check(gradCfg.gradientMode==0 && gradCfg.gradientSecondarySource==0 && !gradCfg.gradientActiveOnly,
+        "gradient defaults to Solid, Auto-Analogous, and both active/inactive");
+  for(int gm=0; gm<=4; ++gm) {
+   gradCfg.gradientMode=gm; gradCfg.gradientSecondarySource=gm%2;
+   gradCfg.activeSecondaryColor=QColor("#ff22aa"); gradCfg.inactiveSecondaryColor=QColor("#22aaff");
+   gradCfg.gradientActiveOnly=(gm%2==1);
+   EmeraldGlass::saveMaterialConfig(gradCfg);
+   const auto loaded=EmeraldGlass::loadMaterialConfig();
+   check(loaded.gradientMode==gm && loaded.gradientSecondarySource==gm%2 &&
+         loaded.activeSecondaryColor==QColor("#ff22aa") && loaded.inactiveSecondaryColor==QColor("#22aaff") &&
+         loaded.gradientActiveOnly==(gm%2==1),
+         "gradient settings round-trip cleanly");
+  }
+  {
+   KConfigGroup mat(KSharedConfig::openConfig(QStringLiteral("emeraldglassrc")),QStringLiteral("Material"));
+   mat.writeEntry("GradientMode",42); mat.writeEntry("GradientSecondarySource",9); mat.sync();
+   auto clamped=EmeraldGlass::loadMaterialConfig();
+   check(clamped.gradientMode==4 && clamped.gradientSecondarySource==1,"gradient enums clamp high values");
+   mat.writeEntry("GradientMode",-2); mat.writeEntry("GradientSecondarySource",-1); mat.sync();
+   clamped=EmeraldGlass::loadMaterialConfig();
+   check(clamped.gradientMode==0 && clamped.gradientSecondarySource==0,"gradient enums clamp negative values");
+  }
+
+  // Auto-Analogous palette produces distinct, non-degenerate secondary colors across presets & white.
+  for(const QColor baseCol : {QColor("#17f559"),QColor("#f7140e"),QColor("#1e8fff"),QColor("#ff9e14"),QColor("#a8e4f5"),QColor("#ffffff")}) {
+   const QColor sec=EmeraldGlass::autoAnalogousSecondaryColor(baseCol);
+   check(sec.isValid() && sec!=baseCol,"Auto-Analogous produces a distinct secondary color");
+  }
+
+  auto *gradModeCombo=tabs->widget(0)->findChild<QComboBox *>(QStringLiteral("gradientMode"));
+  auto *gradSourceCombo=tabs->widget(0)->findChild<QComboBox *>(QStringLiteral("gradientSecondarySource"));
+  auto *gradActiveOnlyCheck=tabs->widget(0)->findChild<QCheckBox *>(QStringLiteral("gradientActiveOnly"));
+  auto *activeSecBtn=tabs->widget(0)->findChild<QPushButton *>(QStringLiteral("activeSecondaryColor"));
+  auto *inactiveSecBtn=tabs->widget(0)->findChild<QPushButton *>(QStringLiteral("inactiveSecondaryColor"));
+  check(gradModeCombo && gradModeCombo->count()==5 && gradSourceCombo && gradSourceCombo->count()==2 &&
+        gradActiveOnlyCheck && activeSecBtn && inactiveSecBtn,
+        "Duo-Tone Gradient controls exist on Colors & Material tab");
+  check(!gradSourceCombo->isEnabled() && !gradActiveOnlyCheck->isEnabled() &&
+        !activeSecBtn->isEnabled() && !inactiveSecBtn->isEnabled(),
+        "secondary source, palette buttons, and active-only controls stay disabled while Solid is selected");
+
+  // Same-theme active & inactive with gradientActiveOnly enabled: active gets gradient, inactive falls back to Solid!
+  gradCfg=EmeraldGlass::MaterialConfig{};
+  gradCfg.activePreset=gradCfg.inactivePreset=QStringLiteral("emerald");
+  EmeraldGlass::saveMaterialConfig(gradCfg);
+  module->load();
+  gradModeCombo->setCurrentIndex(gradModeCombo->findData(int(EmeraldGlass::GradientMode::DiagonalPrism)));
+  check(gradSourceCombo->isEnabled() && gradActiveOnlyCheck->isEnabled() &&
+        activeSecBtn->isEnabled() && inactiveSecBtn->isEnabled(),
+        "all gradient controls enable when gradient mode > 0 and active-only is unchecked");
+  gradActiveOnlyCheck->setChecked(true);
+  check(activeSecBtn->isEnabled() && !inactiveSecBtn->isEnabled(),
+        "inactiveSecondaryColor disables when gradientActiveOnly is checked");
+  module->save(); settings->reconfigured();
+  bridge.client->active=true; d->window()->activeChanged(true);
+  check(d->property("egGradientMode").toInt()==int(EmeraldGlass::GradientMode::DiagonalPrism),
+        "active window publishes DiagonalPrism gradient mode");
+  bridge.client->active=false; d->window()->activeChanged(false);
+  check(d->property("egGradientMode").toInt()==0,
+        "inactive window falls back to Solid when gradientActiveOnly is enabled even with identical theme");
+
+  // Custom secondary colors propagate to Decoration and fall back cleanly when invalid.
+  gradCfg=EmeraldGlass::MaterialConfig{};
+  gradCfg.gradientMode=int(EmeraldGlass::GradientMode::HorizontalSweep);
+  gradCfg.gradientSecondarySource=int(EmeraldGlass::GradientSecondarySource::Custom);
+  gradCfg.activeSecondaryColor=QColor("#14d8ff");
+  gradCfg.inactiveSecondaryColor=QColor("#ff44cc");
+  gradCfg.gradientActiveOnly=false;
+  check(gradCfg.secondaryColorForWindow(true)==QColor("#14d8ff"),"custom active secondary color resolves");
+  EmeraldGlass::MaterialConfig invalidCustom=gradCfg;
+  invalidCustom.activeSecondaryColor=QColor();
+  check(invalidCustom.secondaryColorForWindow(true)==EmeraldGlass::autoAnalogousSecondaryColor(invalidCustom.colorForWindow(true)),
+        "invalid custom secondary color falls back to Auto-Analogous");
+
+  EmeraldGlass::saveMaterialConfig(gradCfg);
+  settings->reconfigured();
+  bridge.client->active=true; d->window()->activeChanged(true);
+  check(d->property("egSecondaryColor").value<QColor>()==QColor("#14d8ff"),
+        "active decoration publishes custom egSecondaryColor");
+  const auto gradBtnCols=d->property("egButtonColors").toList();
+  check(!gradBtnCols.isEmpty() && gradBtnCols.last().value<QVector4D>().z()>0.70f,
+        "HorizontalSweep shifts right-side Monochrome button egButtonColors toward Aqua");
+  bridge.client->active=false; d->window()->activeChanged(false);
+  check(d->property("egSecondaryColor").value<QColor>()==QColor("#ff44cc"),
+        "inactive decoration publishes inactive custom egSecondaryColor");
+  bridge.client->active=true; d->window()->activeChanged(true);
+
+  // CPU renderFrameGlassImage spatial verification: HorizontalSweep, CenterAura, and RimEdgeSplit.
+  EmeraldGlass::MaterialConfig cpuGradCfg;
+  cpuGradCfg.gradientMode=int(EmeraldGlass::GradientMode::HorizontalSweep);
+  const QImage sweepImg=EmeraldGlass::renderFrameGlassImage(
+      QSize(300,120),1,QRectF(0,0,300,120),QRectF(8,39,284,73),QColor("#17f559"),0.9f,5.0f,cpuGradCfg,
+      int(EmeraldGlass::GradientMode::HorizontalSweep),QColor("#14d8ff"));
+  const QColor leftPx=sweepImg.pixelColor(24,20);
+  const QColor rightPx=sweepImg.pixelColor(276,20);
+  check(rightPx.blue()>leftPx.blue()+20,"CPU HorizontalSweep transitions left-to-right toward secondary Aqua");
+
+  const QImage auraImg=EmeraldGlass::renderFrameGlassImage(
+      QSize(300,120),1,QRectF(0,0,300,120),QRectF(8,39,284,73),QColor("#17f559"),0.9f,5.0f,cpuGradCfg,
+      int(EmeraldGlass::GradientMode::CenterAura),QColor("#14d8ff"));
+  const QColor auraEdge=auraImg.pixelColor(20,20);
+  const QColor auraCenter=auraImg.pixelColor(144,20);
+  check(auraCenter.blue()>auraEdge.blue()+20,"CPU CenterAura concentrates secondary Aqua in titlebar center");
+
+  const QImage solidCpuImg=EmeraldGlass::renderFrameGlassImage(
+      QSize(300,120),1,QRectF(0,0,300,120),QRectF(8,39,284,73),QColor("#17f559"),0.9f,5.0f,cpuGradCfg,
+      int(EmeraldGlass::GradientMode::Solid),QColor("#14d8ff"));
+  const QImage rimImg=EmeraldGlass::renderFrameGlassImage(
+      QSize(300,120),1,QRectF(0,0,300,120),QRectF(8,39,284,73),QColor("#17f559"),0.9f,5.0f,cpuGradCfg,
+      int(EmeraldGlass::GradientMode::RimEdgeSplit),QColor("#14d8ff"));
+  const QColor solidEdge=solidCpuImg.pixelColor(150,0);
+  const QColor rimEdge=rimImg.pixelColor(150,0);
+  const QColor rimInterior=rimImg.pixelColor(150,24);
+  check(rimEdge.blue()>solidEdge.blue()+15 &&
+        (rimEdge.blue()-rimEdge.green())>(rimInterior.blue()-rimInterior.green())+15,
+        "CPU RimEdgeSplit shifts outer top rim toward secondary Aqua vs Solid rim and inner body");
+
+  // Auto caption & button glyph contrast adapt when gradient places a bright secondary under text or buttons.
+  EmeraldGlass::MaterialConfig contrastCfg;
+  contrastCfg.activePreset=QStringLiteral("custom");
+  contrastCfg.activeCustomColor=QColor("#10151c");
+  contrastCfg.gradientSecondarySource=int(EmeraldGlass::GradientSecondarySource::Custom);
+  contrastCfg.activeSecondaryColor=QColor("#ffffff");
+  contrastCfg.frameOpacity=0.35f;
+  contrastCfg.tint=0.95f;
+  contrastCfg.adaptiveContrast=0.0f;
+  contrastCfg.titleAlignment=1;
+  contrastCfg.gradientMode=int(EmeraldGlass::GradientMode::Solid);
+  const QColor solidTitleInk=contrastCfg.titleColorForWindow(true,true);
+  contrastCfg.gradientMode=int(EmeraldGlass::GradientMode::CenterAura);
+  const QColor auraTitleInk=contrastCfg.titleColorForWindow(true,true);
+  check(EmeraldGlass::relativeLuminance(solidTitleInk)>0.5f && EmeraldGlass::relativeLuminance(auraTitleInk)<0.2f,
+        "Auto caption ink switches from light to dark over bright CenterAura center");
+
+  contrastCfg.titleAlignment=0;
+  contrastCfg.gradientMode=int(EmeraldGlass::GradientMode::HorizontalSweep);
+  const auto whiteBtnSpec=EmeraldGlass::resolveButtonColor(
+      QColor("#ffffff"),contrastCfg.tint,int(EmeraldGlass::ButtonColorMode::Monochrome),
+      EmeraldGlass::ButtonColorRole::Minimize,false,false,true);
+  const QColor whiteBtnGlyph=EmeraldGlass::buttonGlyphColor(whiteBtnSpec,contrastCfg,true,true,true,false);
+  check(EmeraldGlass::relativeLuminance(whiteBtnGlyph)<0.2f,
+        "buttonGlyphColor switches to dark glyph for light-side gradient buttons even if left caption ink is light");
+
+  module->defaults();
+  check(gradModeCombo->currentData().toInt()==0 && !gradActiveOnlyCheck->isChecked(),
+        "Restore Defaults resets gradient mode to Solid and disables active-only");
  }
  std::cout<<"PASS: blur config, first-page blur slider, frame-only mask, shader/standard blur handoff, unload, disable\n";
 }

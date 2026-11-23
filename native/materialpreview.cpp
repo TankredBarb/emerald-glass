@@ -129,6 +129,8 @@ PreviewFrame MaterialPreview::sampleFrame(const QRectF &box, bool active) const
     PreviewFrame sample;
     sample.frame = box; sample.content = content(box); sample.active = active;
     sample.radius = m_cfg.cornerRadius; sample.pointer = m_pointer;
+    sample.gradientMode = m_cfg.effectiveGradientMode(active);
+    sample.secondaryColor = m_cfg.secondaryColorForWindow(active);
     sample.buttonShape = m_cfg.buttonShape;
     const KConfigGroup settings(KSharedConfig::openConfig(QStringLiteral("kwinrc")), QStringLiteral("org.kde.kdecoration2"));
     auto visible = [&](QString types) {
@@ -180,8 +182,10 @@ PreviewFrame MaterialPreview::sampleFrame(const QRectF &box, bool active) const
     const QColor windowAccent = m_cfg.colorForWindow(active);
     const float windowTint = m_cfg.tintForWindow(active);
     for (int i = 0; i < sample.buttons.size(); ++i) {
+        const QColor localAccent = sampleGradientColor(
+            box, sample.buttons[i].center(), sample.gradientMode, windowAccent, sample.secondaryColor);
         const ButtonColorSpec spec = resolveButtonColor(
-            windowAccent,
+            localAccent,
             windowTint,
             m_cfg.buttonColorMode,
             buttonColorRoleForPreviewChar(sample.buttonTypes[i]),
@@ -377,7 +381,10 @@ QImage MaterialPreview::render(const QSizeF &size, qreal dpr, const PreviewFrame
                 }
             }
             const QColor accent = m_cfg.colorForWindow(sample.active);
+            const QColor secondary = sample.secondaryColor.isValid() ? sample.secondaryColor : m_cfg.secondaryColorForWindow(sample.active);
             m_material->setUniformValue("accent", QVector3D(accent.redF(), accent.greenF(), accent.blueF()));
+            m_material->setUniformValue("accentSecondary", QVector3D(secondary.redF(), secondary.greenF(), secondary.blueF()));
+            m_material->setUniformValue("gradientMode", sample.gradientMode);
             m_material->setUniformValue("pointer", QVector2D(sample.pointer));
             m_material->setUniformValue("refraction", m_cfg.refraction);
             m_material->setUniformValue("dispersion", m_cfg.dispersion);
@@ -417,9 +424,12 @@ void MaterialPreview::drawSample(QPainter &p, const PreviewFrame &sample, bool g
     p.fillRect(client, active ? QColor("#14262d") : QColor("#283037"));
     const qreal dpr = devicePixelRatioF();
     const QRectF localFrame(QPointF(), box.size());
+    const QColor primaryAccent = m_cfg.colorForWindow(active);
+    const QColor secondaryAccent = sample.secondaryColor.isValid() ? sample.secondaryColor : m_cfg.secondaryColorForWindow(active);
     if (!gpu) {
         QImage image = renderFrameGlassImage((box.size() * dpr).toSize(), dpr, localFrame,
-            content(localFrame), m_cfg.colorForWindow(active), m_cfg.tintForWindow(active), m_cfg.cornerRadius, m_cfg);
+            content(localFrame), primaryAccent, m_cfg.tintForWindow(active), m_cfg.cornerRadius, m_cfg,
+            sample.gradientMode, secondaryAccent);
         image.setDevicePixelRatio(dpr);
         p.drawImage(box.topLeft(), image);
     }
@@ -428,7 +438,7 @@ void MaterialPreview::drawSample(QPainter &p, const PreviewFrame &sample, bool g
         frame.addRoundedRect(box, m_cfg.cornerRadius, m_cfg.cornerRadius);
         hole.addRect(client);
         QRadialGradient glow(m_pointer, 60);
-        QColor color = m_cfg.colorForWindow(active).lighter(135);
+        QColor color = sampleGradientColor(box, m_pointer, sample.gradientMode, primaryAccent, secondaryAccent).lighter(135);
         color.setAlphaF(std::clamp(m_cfg.hoverGlow * 0.28f, 0.0f, 0.55f));
         glow.setColorAt(0, color); color.setAlphaF(0); glow.setColorAt(1, color);
         p.fillPath(frame.subtracted(hole), glow);
@@ -440,15 +450,16 @@ void MaterialPreview::drawSample(QPainter &p, const PreviewFrame &sample, bool g
         const bool pressed = (i == sample.pressedButton);
         const QVector4D radVec = i < sample.buttonRadii.size() ? sample.buttonRadii[i] : QVector4D(3, 3, 3, 3);
         const ButtonRadii rad{radVec.x(), radVec.y(), radVec.z(), radVec.w()};
+        const QColor localAccent = sampleGradientColor(box, b.center(), sample.gradientMode, primaryAccent, secondaryAccent);
         const ButtonColorSpec colorSpec = resolveButtonColor(
-            m_cfg.colorForWindow(active),
+            localAccent,
             m_cfg.tintForWindow(active),
             m_cfg.buttonColorMode,
             buttonColorRoleForPreviewChar(type),
             hovered,
             pressed,
             active);
-        if (!gpu) paintButtonGlass(&p, b, dpr, m_cfg.colorForWindow(active), m_cfg.tintForWindow(active), i == sample.closeButton, hovered, pressed, m_pointer, m_cfg, rad, m_closePreviewStyle < 0 ? &colorSpec : nullptr);
+        if (!gpu) paintButtonGlass(&p, b, dpr, localAccent, m_cfg.tintForWindow(active), i == sample.closeButton, hovered, pressed, m_pointer, m_cfg, rad, m_closePreviewStyle < 0 ? &colorSpec : nullptr);
         const QPointF c = b.center() + QPointF(0, i == sample.pressedButton ? 1 : 0);
         const bool stealthIdle = (m_cfg.buttonShape == int(ButtonShape::StealthLens)) && !hovered && !pressed;
         p.setPen(QPen(buttonGlyphColor(colorSpec, m_cfg, active, gpu, true, stealthIdle), 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));

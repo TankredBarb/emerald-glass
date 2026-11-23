@@ -16,6 +16,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSlider>
 #include <QSpinBox>
 #include <QTabWidget>
@@ -44,7 +45,10 @@ public:
         rootLayout->addWidget(tabs, 1);
 
         // Tab 1: Colors & Material
-        auto *colorPage = new QWidget(tabs);
+        auto *colorScroll = new QScrollArea(tabs);
+        colorScroll->setWidgetResizable(true);
+        colorScroll->setFrameShape(QFrame::NoFrame);
+        auto *colorPage = new QWidget(colorScroll);
         auto *colorLayout = new QVBoxLayout(colorPage);
 
         auto *blurGroup = new QGroupBox(QStringLiteral("Border Blur"), colorPage);
@@ -106,8 +110,43 @@ public:
         m_hoverGlowSlider->setObjectName(QStringLiteral("cursorGlowStrength"));
 
         colorLayout->addWidget(colorGroup);
+
+        auto *gradientGroup = new QGroupBox(QStringLiteral("Duo-Tone Gradient"), colorPage);
+        auto *gradientForm = new QFormLayout(gradientGroup);
+
+        m_gradientModeCombo = new QComboBox(gradientGroup);
+        m_gradientModeCombo->setObjectName(QStringLiteral("gradientMode"));
+        m_gradientModeCombo->addItem(QStringLiteral("Solid (Single Color)"), int(GradientMode::Solid));
+        m_gradientModeCombo->addItem(QStringLiteral("Horizontal Sweep"), int(GradientMode::HorizontalSweep));
+        m_gradientModeCombo->addItem(QStringLiteral("Diagonal Prism (35°)"), int(GradientMode::DiagonalPrism));
+        m_gradientModeCombo->addItem(QStringLiteral("Center Aura"), int(GradientMode::CenterAura));
+        m_gradientModeCombo->addItem(QStringLiteral("Rim & Edge Split"), int(GradientMode::RimEdgeSplit));
+        gradientForm->addRow(QStringLiteral("Gradient style:"), m_gradientModeCombo);
+
+        m_gradientSourceCombo = new QComboBox(gradientGroup);
+        m_gradientSourceCombo->setObjectName(QStringLiteral("gradientSecondarySource"));
+        m_gradientSourceCombo->addItem(QStringLiteral("Auto-Analogous (Harmonic)"), int(GradientSecondarySource::AutoAnalogous));
+        m_gradientSourceCombo->addItem(QStringLiteral("Custom Colors"), int(GradientSecondarySource::Custom));
+        gradientForm->addRow(QStringLiteral("Secondary color:"), m_gradientSourceCombo);
+
+        m_activeSecondaryBtn = new QPushButton(QStringLiteral("Active 2nd..."), gradientGroup);
+        m_inactiveSecondaryBtn = new QPushButton(QStringLiteral("Inactive 2nd..."), gradientGroup);
+        m_activeSecondaryBtn->setObjectName(QStringLiteral("activeSecondaryColor"));
+        m_inactiveSecondaryBtn->setObjectName(QStringLiteral("inactiveSecondaryColor"));
+        auto *secondaryRow = new QHBoxLayout;
+        secondaryRow->addWidget(m_activeSecondaryBtn, 1);
+        secondaryRow->addWidget(m_inactiveSecondaryBtn, 1);
+        gradientForm->addRow(QStringLiteral("Custom palette:"), secondaryRow);
+
+        m_gradientActiveOnlyCheck = new QCheckBox(QStringLiteral("Apply gradient to active window only"), gradientGroup);
+        m_gradientActiveOnlyCheck->setObjectName(QStringLiteral("gradientActiveOnly"));
+        m_gradientActiveOnlyCheck->setToolTip(QStringLiteral("Inactive windows fall back to a calm single-color glass, making focus clear even when active and inactive windows share the same theme."));
+        gradientForm->addRow(QString(), m_gradientActiveOnlyCheck);
+
+        colorLayout->addWidget(gradientGroup);
         colorLayout->addStretch(1);
-        tabs->addTab(colorPage, QStringLiteral("Colors && Material"));
+        colorScroll->setWidget(colorPage);
+        tabs->addTab(colorScroll, QStringLiteral("Colors && Material"));
 
         // Tab 2: Liquid Glass Optics
         auto *opticsPage = new QWidget(tabs);
@@ -202,6 +241,37 @@ public:
             if (c.isValid()) {
                 m_working.inactiveCustomColor = c;
                 m_inactivePreset->setCurrentIndex(m_inactivePreset->findData(QStringLiteral("custom")));
+                onUiEdited();
+            }
+        });
+        connect(m_gradientModeCombo, &QComboBox::currentIndexChanged, this, &EmeraldGlassConfigModule::onUiEdited);
+        connect(m_gradientSourceCombo, &QComboBox::currentIndexChanged, this, &EmeraldGlassConfigModule::onUiEdited);
+        connect(m_gradientActiveOnlyCheck, &QCheckBox::toggled, this, &EmeraldGlassConfigModule::onUiEdited);
+        connect(m_activeSecondaryBtn, &QPushButton::clicked, this, [this] {
+            const QColor seed = m_working.secondaryColorForWindow(true);
+            const QColor c = QColorDialog::getColor(seed, widget(), QStringLiteral("Select Active Secondary Gradient Color"));
+            if (c.isValid()) {
+                if (m_working.gradientSecondarySource == int(GradientSecondarySource::AutoAnalogous)) {
+                    m_working.inactiveSecondaryColor = m_working.secondaryColorForWindow(false);
+                }
+                m_working.activeSecondaryColor = c;
+                m_updating = true;
+                m_gradientSourceCombo->setCurrentIndex(m_gradientSourceCombo->findData(int(GradientSecondarySource::Custom)));
+                m_updating = false;
+                onUiEdited();
+            }
+        });
+        connect(m_inactiveSecondaryBtn, &QPushButton::clicked, this, [this] {
+            const QColor seed = m_working.secondaryColorForWindow(false);
+            const QColor c = QColorDialog::getColor(seed, widget(), QStringLiteral("Select Inactive Secondary Gradient Color"));
+            if (c.isValid()) {
+                if (m_working.gradientSecondarySource == int(GradientSecondarySource::AutoAnalogous)) {
+                    m_working.activeSecondaryColor = m_working.secondaryColorForWindow(true);
+                }
+                m_working.inactiveSecondaryColor = c;
+                m_updating = true;
+                m_gradientSourceCombo->setCurrentIndex(m_gradientSourceCombo->findData(int(GradientSecondarySource::Custom)));
+                m_updating = false;
                 onUiEdited();
             }
         });
@@ -314,11 +384,19 @@ private:
     void updateButtonSwatches()
     {
         auto applySwatch = [](QPushButton *btn, const QColor &c) {
-            btn->setStyleSheet(QStringLiteral("QPushButton { background-color: %1; color: #101814; font-weight: bold; border-radius: 4px; padding: 4px 10px; }")
-                                   .arg(c.name()));
+            const QString fg = relativeLuminance(c) < 0.28f ? QStringLiteral("#f2fff8") : QStringLiteral("#101814");
+            btn->setStyleSheet(QStringLiteral("QPushButton { background-color: %1; color: %2; font-weight: bold; border-radius: 4px; padding: 4px 10px; }")
+                                   .arg(c.name(), fg));
         };
         applySwatch(m_activeColorBtn, m_working.colorForWindow(true));
         applySwatch(m_inactiveColorBtn, m_working.colorForWindow(false));
+        applySwatch(m_activeSecondaryBtn, m_working.secondaryColorForWindow(true));
+        applySwatch(m_inactiveSecondaryBtn, m_working.secondaryColorForWindow(false));
+        const bool gradEnabled = m_working.gradientMode > 0;
+        m_gradientSourceCombo->setEnabled(gradEnabled);
+        m_gradientActiveOnlyCheck->setEnabled(gradEnabled);
+        m_activeSecondaryBtn->setEnabled(gradEnabled);
+        m_inactiveSecondaryBtn->setEnabled(gradEnabled && !m_working.gradientActiveOnly);
     }
 
     void syncWidgetsFromConfig(const MaterialConfig &cfg)
@@ -331,6 +409,9 @@ private:
 
         m_activeTitleText->setCurrentIndex(m_activeTitleText->findData(cfg.activeTitleText));
         m_inactiveTitleText->setCurrentIndex(m_inactiveTitleText->findData(cfg.inactiveTitleText));
+        m_gradientModeCombo->setCurrentIndex(std::max(0, m_gradientModeCombo->findData(cfg.gradientMode)));
+        m_gradientSourceCombo->setCurrentIndex(std::max(0, m_gradientSourceCombo->findData(cfg.gradientSecondarySource)));
+        m_gradientActiveOnlyCheck->setChecked(cfg.gradientActiveOnly);
         m_tintSlider->setValue(qRound(cfg.tint * 100.0f));
         m_inactiveTintSlider->setValue(qRound(cfg.inactiveTint * 100.0f));
         m_opacitySlider->setValue(qRound(cfg.frameOpacity * 100.0f));
@@ -363,6 +444,9 @@ private:
         m_working.inactivePreset = m_inactivePreset->currentData().toString();
         m_working.activeTitleText = m_activeTitleText->currentData().toInt();
         m_working.inactiveTitleText = m_inactiveTitleText->currentData().toInt();
+        m_working.gradientMode = m_gradientModeCombo->currentData().toInt();
+        m_working.gradientSecondarySource = m_gradientSourceCombo->currentData().toInt();
+        m_working.gradientActiveOnly = m_gradientActiveOnlyCheck->isChecked();
         m_working.tint = m_tintSlider->value() / 100.0f;
         m_working.inactiveTint = m_inactiveTintSlider->value() / 100.0f;
         m_working.frameOpacity = m_opacitySlider->value() / 100.0f;
@@ -410,6 +494,11 @@ private:
     QPushButton *m_inactiveColorBtn = nullptr;
     QComboBox *m_activeTitleText = nullptr;
     QComboBox *m_inactiveTitleText = nullptr;
+    QComboBox *m_gradientModeCombo = nullptr;
+    QComboBox *m_gradientSourceCombo = nullptr;
+    QPushButton *m_activeSecondaryBtn = nullptr;
+    QPushButton *m_inactiveSecondaryBtn = nullptr;
+    QCheckBox *m_gradientActiveOnlyCheck = nullptr;
     QSlider *m_tintSlider = nullptr;
     QSlider *m_inactiveTintSlider = nullptr;
     QSlider *m_opacitySlider = nullptr;

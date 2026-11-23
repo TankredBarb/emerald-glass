@@ -52,6 +52,19 @@ inline QColor resolvePresetColor(const QString &preset, const QColor &customColo
     return fallback;
 }
 
+enum class GradientMode : int {
+    Solid = 0,
+    HorizontalSweep = 1,
+    DiagonalPrism = 2,
+    CenterAura = 3,
+    RimEdgeSplit = 4,
+};
+
+enum class GradientSecondarySource : int {
+    AutoAnalogous = 0,
+    Custom = 1,
+};
+
 enum class ButtonShape : int {
     Classic = 0,
     JoinedStrip = 1,
@@ -163,6 +176,11 @@ struct MaterialConfig {
     int titleHeight = 39;
     int borderWidth = 8;
     int titleAlignment = 0; // 0 = Left, 1 = Center, 2 = CenterFullWidth
+    int gradientMode = 0; // 0 = Solid, 1 = HorizontalSweep, 2 = DiagonalPrism, 3 = CenterAura, 4 = RimEdgeSplit
+    int gradientSecondarySource = 0; // 0 = AutoAnalogous, 1 = Custom
+    QColor activeSecondaryColor = QColor(0x14, 0xd8, 0xff);
+    QColor inactiveSecondaryColor = QColor(0xff, 0x9e, 0x14);
+    bool gradientActiveOnly = false;
     int buttonShape = 0; // 0 = Classic, 1 = JoinedStrip, 2 = TopDockedTabs, 3 = LiquidCapsules, 4 = StealthLens
     int buttonColorMode = 0; // 0 = Monochrome, 1 = AlwaysTintedClose, 2 = AdaptiveJewelTrio, 3 = HarmonicHsl, 4 = SmokedChrome
     bool useSystemButtons = false;
@@ -174,6 +192,16 @@ struct MaterialConfig {
             ? resolvePresetColor(activePreset, activeCustomColor, QColor(0x17, 0xf5, 0x59))
             : resolvePresetColor(inactivePreset, inactiveCustomColor, QColor(0xf7, 0x14, 0x0e));
     }
+
+    int effectiveGradientMode(bool active) const
+    {
+        if (gradientMode <= 0 || (gradientActiveOnly && !active)) {
+            return 0;
+        }
+        return std::clamp(gradientMode, 0, 4);
+    }
+
+    QColor secondaryColorForWindow(bool active) const;
 
     float tintForWindow(bool active) const
     {
@@ -212,6 +240,11 @@ inline MaterialConfig loadMaterialConfig()
     cfg.blurStrength = std::clamp(mat.readEntry("BlurStrength", 6), 0, 15);
     cfg.desktopBackdropForMaximized = mat.readEntry("DesktopBackdropForMaximized", false);
     cfg.shaderEffectEnabled = mat.readEntry("ShaderEffectEnabled", true);
+    cfg.gradientMode = std::clamp(mat.readEntry("GradientMode", 0), 0, 4);
+    cfg.gradientSecondarySource = std::clamp(mat.readEntry("GradientSecondarySource", 0), 0, 1);
+    cfg.activeSecondaryColor = mat.readEntry("ActiveSecondaryColor", QColor(0x14, 0xd8, 0xff));
+    cfg.inactiveSecondaryColor = mat.readEntry("InactiveSecondaryColor", QColor(0xff, 0x9e, 0x14));
+    cfg.gradientActiveOnly = mat.readEntry("GradientActiveOnly", false);
 
     KConfigGroup geom(config, QStringLiteral("Geometry"));
     cfg.cornerRadius = std::clamp(geom.readEntry("CornerRadius", 5), 0, 18);
@@ -247,6 +280,11 @@ inline void saveMaterialConfig(const MaterialConfig &cfg)
     mat.writeEntry("BlurStrength", cfg.blurStrength);
     mat.writeEntry("DesktopBackdropForMaximized", cfg.desktopBackdropForMaximized);
     mat.writeEntry("ShaderEffectEnabled", cfg.shaderEffectEnabled);
+    mat.writeEntry("GradientMode", std::clamp(cfg.gradientMode, 0, 4));
+    mat.writeEntry("GradientSecondarySource", std::clamp(cfg.gradientSecondarySource, 0, 1));
+    mat.writeEntry("ActiveSecondaryColor", cfg.activeSecondaryColor);
+    mat.writeEntry("InactiveSecondaryColor", cfg.inactiveSecondaryColor);
+    mat.writeEntry("GradientActiveOnly", cfg.gradientActiveOnly);
 
     KConfigGroup geom(config, QStringLiteral("Geometry"));
     geom.writeEntry("CornerRadius", cfg.cornerRadius);
@@ -428,7 +466,121 @@ inline QRgb toPremultipliedRgb(Vec3 color, float alpha)
     return qRgba(ri, gi, bi, ai);
 }
 
+inline void evalFrameGradient(float x,
+                              float y,
+                              const QRectF &frame,
+                              float edgeFactor,
+                              int gradMode,
+                              Vec3 c1,
+                              Vec3 c2,
+                              Vec3 &bodyAccent,
+                              Vec3 &rimAccent)
+{
+    if (gradMode <= 0) {
+        bodyAccent = c1;
+        rimAccent = c1;
+        return;
+    }
+    const float u = clampf((x - float(frame.x())) / std::max(float(frame.width()), 1.0f), 0.0f, 1.0f);
+    const float v = clampf((y - float(frame.y())) / std::max(float(frame.height()), 1.0f), 0.0f, 1.0f);
+    if (gradMode == int(GradientMode::HorizontalSweep)) {
+        const float t = smoothstep(0.08f, 0.92f, u);
+        bodyAccent = mix3(c1, c2, t);
+        rimAccent = bodyAccent;
+        return;
+    }
+    if (gradMode == int(GradientMode::DiagonalPrism)) {
+        const float t = smoothstep(0.12f, 0.96f, u * 0.72f + v * 0.38f);
+        bodyAccent = mix3(c1, c2, t);
+        rimAccent = bodyAccent;
+        return;
+    }
+    if (gradMode == int(GradientMode::CenterAura)) {
+        const float dist = std::hypot((u - 0.48f) * 1.18f, (v - 0.22f) * 2.0f);
+        const float t = 1.0f - smoothstep(0.06f, 0.56f, dist);
+        bodyAccent = mix3(c1, c2, t);
+        rimAccent = bodyAccent;
+        return;
+    }
+    if (gradMode == int(GradientMode::RimEdgeSplit)) {
+        const float bodyT = clampf(smoothstep(0.15f, 0.95f, v) * 0.24f + edgeFactor * 0.50f, 0.0f, 1.0f);
+        const float rimT = clampf(0.92f * edgeFactor + 0.45f * smoothstep(0.15f, 0.90f, v + u * 0.25f), 0.0f, 1.0f);
+        bodyAccent = mix3(c1, c2, bodyT);
+        rimAccent = mix3(c1, c2, rimT);
+        return;
+    }
+    bodyAccent = c1;
+    rimAccent = c1;
+}
+
 } // namespace Math
+
+inline QColor autoAnalogousSecondaryColor(const QColor &primary)
+{
+    const Math::Vec3 c{float(primary.redF()), float(primary.greenF()), float(primary.blueF())};
+    const Math::Hsv hsv = Math::rgbToHsv(c);
+    Math::Vec3 out;
+    if (hsv.s < 0.15f) {
+        out = Math::hsvToRgb(235.0f, 0.28f, Math::clampf(std::max(hsv.v, 0.78f), 0.78f, 0.96f));
+    } else if (hsv.h >= 175.0f && hsv.h < 230.0f && hsv.s < 0.45f && hsv.v > 0.75f) {
+        out = Math::hsvToRgb(hsv.h + 62.0f, 0.30f, 0.96f);
+    } else {
+        float h2 = hsv.h + 45.0f;
+        if (hsv.h >= 340.0f || hsv.h < 18.0f) {
+            h2 = hsv.h + 38.0f;
+        } else if (hsv.h >= 18.0f && hsv.h < 65.0f) {
+            h2 = hsv.h - 36.0f;
+        } else if (hsv.h >= 65.0f && hsv.h < 175.0f) {
+            h2 = hsv.h + 52.0f;
+        } else if (hsv.h >= 175.0f && hsv.h < 230.0f) {
+            h2 = hsv.h + 68.0f;
+        } else {
+            h2 = hsv.h - 52.0f;
+        }
+        out = Math::hsvToRgb(h2, Math::clampf(hsv.s, 0.28f, 0.95f), Math::clampf(std::max(hsv.v, 0.85f), 0.85f, 1.0f));
+    }
+    return QColor::fromRgbF(
+        Math::clampf(out.x, 0.0f, 1.0f),
+        Math::clampf(out.y, 0.0f, 1.0f),
+        Math::clampf(out.z, 0.0f, 1.0f));
+}
+
+inline QColor MaterialConfig::secondaryColorForWindow(bool active) const
+{
+    if (gradientSecondarySource == int(GradientSecondarySource::Custom)) {
+        const QColor custom = active ? activeSecondaryColor : inactiveSecondaryColor;
+        if (custom.isValid()) {
+            return custom;
+        }
+    }
+    return autoAnalogousSecondaryColor(colorForWindow(active));
+}
+
+inline QColor sampleGradientColor(const QRectF &frame,
+                                  const QPointF &pos,
+                                  int gradMode,
+                                  const QColor &primary,
+                                  const QColor &secondary)
+{
+    if (gradMode <= 0 || gradMode == int(GradientMode::RimEdgeSplit)) {
+        return primary;
+    }
+    Math::Vec3 body, rim;
+    Math::evalFrameGradient(
+        float(pos.x()),
+        float(pos.y()),
+        frame,
+        0.0f,
+        gradMode,
+        {float(primary.redF()), float(primary.greenF()), float(primary.blueF())},
+        {float(secondary.redF()), float(secondary.greenF()), float(secondary.blueF())},
+        body,
+        rim);
+    return QColor::fromRgbF(
+        Math::clampf(body.x, 0.0f, 1.0f),
+        Math::clampf(body.y, 0.0f, 1.0f),
+        Math::clampf(body.z, 0.0f, 1.0f));
+}
 
 // Linear sRGB luminance for comparing foreground/background contrast.
 inline float relativeLuminance(const QColor &color)
@@ -445,7 +597,17 @@ inline QColor MaterialConfig::titleColorForWindow(bool active, bool opticalMater
     if (mode == 1) return light;
     if (mode == 2) return dark;
 
-    const auto preset = colorForWindow(active);
+    const int gradMode = effectiveGradientMode(active);
+    QColor preset = colorForWindow(active);
+    if (gradMode > 0 && gradMode != int(GradientMode::RimEdgeSplit)) {
+        const qreal titleX = (titleAlignment == 0) ? 25.0 : 50.0;
+        preset = sampleGradientColor(
+            QRectF(0.0, 0.0, 100.0, 100.0),
+            QPointF(titleX, 14.0),
+            gradMode,
+            preset,
+            secondaryColorForWindow(active));
+    }
     const Math::Vec3 accent{float(preset.redF()), float(preset.greenF()), float(preset.blueF())};
     const float strength = tintForWindow(active);
     // The preset is a stable reference backdrop, not a live wallpaper sample.
@@ -672,11 +834,12 @@ inline QColor buttonGlyphColor(const ButtonColorSpec &spec,
     if (spec.fillBoost >= 0.12f) {
         return light;
     }
+    const int titleMode = active ? cfg.activeTitleText : cfg.inactiveTitleText;
     const bool darkTitle = relativeLuminance(cfg.titleColorForWindow(active, opticalMaterial)) < 0.2f;
     if (stealthIdle) {
         return darkTitle ? dark : light;
     }
-    if (!darkTitle) {
+    if (!darkTitle && !(titleMode == 0 && cfg.effectiveGradientMode(active) > 0)) {
         return light;
     }
     const Math::Vec3 base{float(spec.color.redF()), float(spec.color.greenF()), float(spec.color.blueF())};
@@ -711,7 +874,9 @@ inline QImage renderFrameGlassImage(const QSize &pixelSize,
                                     const QColor &accentColor,
                                     float tintStrength,
                                     float outerRadius,
-                                    const MaterialConfig &cfg)
+                                    const MaterialConfig &cfg,
+                                    int gradientMode = 0,
+                                    const QColor &secondaryColor = QColor())
 {
     if (pixelSize.isEmpty()) {
         return {};
@@ -721,7 +886,9 @@ inline QImage renderFrameGlassImage(const QSize &pixelSize,
 
     const float scale = std::max(float(dpr), 1.0f);
     const float invScale = 1.0f / scale;
-    const Math::Vec3 accent{float(accentColor.redF()), float(accentColor.greenF()), float(accentColor.blueF())};
+    const Math::Vec3 primaryAccent{float(accentColor.redF()), float(accentColor.greenF()), float(accentColor.blueF())};
+    const QColor resolvedSecondary = secondaryColor.isValid() ? secondaryColor : accentColor;
+    const Math::Vec3 secondaryAccent{float(resolvedSecondary.redF()), float(resolvedSecondary.greenF()), float(resolvedSecondary.blueF())};
 
     // Normalized light vector (-0.5, -0.85, 1.2) + view (0, 0, 1) -> half-vector
     constexpr float hx = -0.2073f;
@@ -765,6 +932,18 @@ inline QImage renderFrameGlassImage(const QSize &pixelSize,
                 const float dy = gy / glen;
 
                 const float bevel = std::exp(-std::max(-dist, 0.0f) / 2.4f);
+                Math::Vec3 accent = primaryAccent;
+                Math::Vec3 rimAccent = primaryAccent;
+                if (gradientMode > 0) {
+                    float gradEdge = bevel;
+                    if (gradientMode == int(GradientMode::RimEdgeSplit)) {
+                        const float dOuter = Math::boxDistance(
+                            x, y, float(frameRect.x()), float(frameRect.y()),
+                            float(frameRect.width()), float(frameRect.height()), outerRadius);
+                        gradEdge = std::exp(-std::max(-dOuter, 0.0f) / 3.4f);
+                    }
+                    Math::evalFrameGradient(x, y, frameRect, gradEdge, gradientMode, primaryAccent, secondaryAccent, accent, rimAccent);
+                }
                 float nx = dx * bevel * 1.6f;
                 float ny = dy * bevel * 1.6f;
                 float nz = 1.0f;
@@ -797,7 +976,7 @@ inline QImage renderFrameGlassImage(const QSize &pixelSize,
                 color.y *= edgeBoost;
                 color.z *= edgeBoost;
 
-                const Math::Vec3 specTint = Math::mix3({1.0f, 1.0f, 1.0f}, accent, 0.18f);
+                const Math::Vec3 specTint = Math::mix3({1.0f, 1.0f, 1.0f}, rimAccent, gradientMode == int(GradientMode::RimEdgeSplit) ? 0.35f : 0.18f);
                 const float specAdd = specular * 0.65f + fresnel * 0.25f;
                 color.x += specTint.x * specAdd;
                 color.y += specTint.y * specAdd;
@@ -813,7 +992,7 @@ inline QImage renderFrameGlassImage(const QSize &pixelSize,
                 // Crisp outer/inner contour and dark lip (exact match to glass.frag)
                 const float cArg = (dist + 0.65f * invScale) * scale / 0.48f;
                 const float contour = std::exp(-cArg * cArg);
-                const Math::Vec3 contourColor = Math::mix3(accent, {1.0f, 1.0f, 1.0f}, std::max(directionalEdge, 0.0f) * 0.7f);
+                const Math::Vec3 contourColor = Math::mix3(rimAccent, {1.0f, 1.0f, 1.0f}, std::max(directionalEdge, 0.0f) * 0.7f);
                 color = Math::mix3(color, contourColor, contour * 0.82f);
 
                 const float lArg = (dist + 1.65f * invScale) * scale / 0.65f;

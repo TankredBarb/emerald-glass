@@ -79,6 +79,12 @@ public:
 
     const MaterialConfig &config() const { return m_cfg; }
     QColor currentAccentColor() const { return m_cfg.colorForWindow(window() && window()->isActive()); }
+    int currentGradientMode() const { return m_cfg.effectiveGradientMode(window() && window()->isActive()); }
+    QColor currentSecondaryColor() const { return m_cfg.secondaryColorForWindow(window() && window()->isActive()); }
+    QColor accentAt(const QPointF &pos) const
+    {
+        return sampleGradientColor(rect(), pos, currentGradientMode(), currentAccentColor(), currentSecondaryColor());
+    }
     float currentTintStrength() const { return m_cfg.tintForWindow(window() && window()->isActive()); }
     QPointF pointerPos() const { return m_pointer; }
     bool hasDesktopSnapshot() const
@@ -205,7 +211,7 @@ public:
                 framePath = framePath.subtracted(holePath);
             }
             QRadialGradient rimGlow(m_pointer, 60.0);
-            QColor glowCol = currentAccentColor().lighter(135);
+            QColor glowCol = accentAt(m_pointer).lighter(135);
             glowCol.setAlphaF(std::clamp(0.28f * m_cfg.hoverGlow, 0.0f, 0.55f));
             rimGlow.setColorAt(0.0, glowCol);
             glowCol.setAlphaF(0.0f);
@@ -275,6 +281,8 @@ public:
         int closeIdx = -1;
         const bool active = window() && window()->isActive();
         const QColor windowAccent = currentAccentColor();
+        const int gradMode = currentGradientMode();
+        const QColor secondary = currentSecondaryColor();
         const float windowTint = currentTintStrength();
 
         auto collectButtons = [&](KDecoration3::DecorationButtonGroup *group) {
@@ -293,8 +301,10 @@ public:
                 geometry.append(btn->geometry());
                 const ButtonRadii r = btn->radii();
                 radii.append(QVector4D(r.tl, r.tr, r.br, r.bl));
+                const QColor localAccent = sampleGradientColor(
+                    rect(), btn->geometry().center(), gradMode, windowAccent, secondary);
                 const ButtonColorSpec spec = resolveButtonColor(
-                    windowAccent,
+                    localAccent,
                     windowTint,
                     m_cfg.buttonColorMode,
                     buttonColorRoleForType(btn->type()),
@@ -333,7 +343,9 @@ public:
         setProperty("egPressed", pressed);
         setProperty("egPointer", m_pointer);
         setProperty("egContent", content());
-        setProperty("egColor", currentAccentColor());
+        setProperty("egColor", windowAccent);
+        setProperty("egGradientMode", gradMode);
+        setProperty("egSecondaryColor", secondary);
         setProperty("egRefraction", m_cfg.refraction);
         setProperty("egTint", currentTintStrength());
         setProperty("egFrameOpacity", m_cfg.frameOpacity);
@@ -409,6 +421,8 @@ private:
         frame.active = window()->isActive();
         frame.radius = radius();
         frame.pointer = m_pointer;
+        frame.gradientMode = currentGradientMode();
+        frame.secondaryColor = currentSecondaryColor();
         frame.buttonShape = m_cfg.buttonShape;
         frame.closeButton = property("egCloseButton").toInt();
         frame.hoverButton = property("egHover").toInt();
@@ -452,8 +466,12 @@ private:
     {
         // Away from the corners the SDF and title lighting are invariant along
         // each edge. Cache those strips once instead of rerendering on resize.
+        const int gradMode = currentGradientMode();
+        const QColor secondary = currentSecondaryColor();
         const qreal cap = std::max(m_cfg.titleHeight, m_cfg.borderWidth + m_cfg.cornerRadius) + 4;
-        const bool stretch = logicalSize.width() >= cap * 2 + 1 && logicalSize.height() >= m_cfg.titleHeight + cap * 2 + 1;
+        const bool stretch = (gradMode == 0)
+            && logicalSize.width() >= cap * 2 + 1
+            && logicalSize.height() >= m_cfg.titleHeight + cap * 2 + 1;
         auto samePixelPhase = [dpr](qreal base, qreal target) {
             const qreal difference = (target - base) * dpr;
             return base + (difference - std::floor(difference)) / dpr;
@@ -472,6 +490,8 @@ private:
             qFuzzyCompare(m_cachedDpr, dpr) &&
             m_cachedActive == active &&
             m_cachedMaximized == maximized &&
+            m_cachedGradientMode == gradMode &&
+            m_cachedSecondaryColor == secondary &&
             m_stretchedFrame == stretch && m_cachedContent == cacheContent) {
             return;
         }
@@ -480,6 +500,8 @@ private:
         m_cachedDpr = dpr;
         m_cachedActive = active;
         m_cachedMaximized = maximized;
+        m_cachedGradientMode = gradMode;
+        m_cachedSecondaryColor = secondary;
         m_cachedContent = cacheContent;
         m_stretchedFrame = stretch;
         m_frameCap = cap;
@@ -493,7 +515,9 @@ private:
             currentAccentColor(),
             currentTintStrength(),
             float(radius()),
-            m_cfg);
+            m_cfg,
+            gradMode,
+            secondary);
         m_cachedFrame.setDevicePixelRatio(dpr);
     }
 
@@ -660,6 +684,8 @@ private:
     qreal m_cachedDpr = 1.0;
     bool m_cachedActive = false;
     bool m_cachedMaximized = false;
+    int m_cachedGradientMode = 0;
+    QColor m_cachedSecondaryColor;
     QRectF m_cachedContent;
     bool m_stretchedFrame = false;
     qreal m_frameCap = 0;
@@ -787,8 +813,9 @@ void Button::paint(QPainter *p, const QRectF &repaintArea)
         : (deco->window() ? std::max(deco->window()->scale(), 1.0) : 1.0);
 
     const bool active = deco->window() && deco->window()->isActive();
+    const QColor buttonBaseAccent = deco->accentAt(geometry().center());
     const ButtonColorSpec colorSpec = resolveButtonColor(
-        deco->currentAccentColor(),
+        buttonBaseAccent,
         deco->currentTintStrength(),
         deco->config().buttonColorMode,
         buttonColorRoleForType(type()),
@@ -801,7 +828,7 @@ void Button::paint(QPainter *p, const QRectF &repaintArea)
             ? (deco->pointerPos().x() >= 0.0 ? deco->pointerPos() : geometry().center())
             : QPointF(-100.0, -100.0);
         const QRect aligned = geometry().adjusted(-1, -1, 1, 1).toAlignedRect();
-        const MaterialKey key{deco->config(), deco->currentAccentColor(),
+        const MaterialKey key{deco->config(), buttonBaseAccent,
             geometry().translated(-aligned.topLeft()),
             isHovered() ? ptr - aligned.topLeft() : QPointF(-100, -100),
             dpr, deco->currentTintStrength(), m_radii, colorSpec, isHovered(), isPressed()};

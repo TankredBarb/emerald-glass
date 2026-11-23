@@ -1708,6 +1708,10 @@ bool BlurEffect::blur(const RenderTarget &renderTarget, const RenderViewport &vi
 
         const QColor accent = emeraldDecoration->property("egColor").value<QColor>();
         materialShader->setUniform("accent", QVector3D(accent.redF(), accent.greenF(), accent.blueF()));
+        const QColor secondary = emeraldDecoration->property("egSecondaryColor").value<QColor>();
+        const QColor resolvedSecondary = secondary.isValid() ? secondary : accent;
+        materialShader->setUniform("accentSecondary", QVector3D(resolvedSecondary.redF(), resolvedSecondary.greenF(), resolvedSecondary.blueF()));
+        materialShader->setUniform("gradientMode", emeraldDecoration->property("egGradientMode").toInt());
         const QPointF cursor = effects->cursorPos() - backgroundRect.topLeft();
         materialShader->setUniform("pointer", QVector2D(cursor));
         materialShader->setUniform("refraction", emeraldDecoration->property("egRefraction").toFloat());
